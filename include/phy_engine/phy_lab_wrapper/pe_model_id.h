@@ -60,4 +60,65 @@ inline constexpr ::std::string_view random_generator = "Random Generator";
 inline constexpr ::std::string_view eight_bit_input = "8bit Input";
 inline constexpr ::std::string_view eight_bit_display = "8bit Display";
 inline constexpr ::std::string_view schmitt_trigger = "Schmitt Trigger";
+
+// Sensors & Instruments
+inline constexpr ::std::string_view accelerometer = "Accelerometer";
+inline constexpr ::std::string_view analog_joystick = "Analog Joystick";
+inline constexpr ::std::string_view attitude_sensor = "Attitude Sensor";
+inline constexpr ::std::string_view gravity_sensor = "Gravity Sensor";
+inline constexpr ::std::string_view gyroscope = "Gyroscope";
+inline constexpr ::std::string_view linear_accelerometer = "Linear Accelerometer";
+inline constexpr ::std::string_view magnetic_field_sensor = "Magnetic Field Sensor";
+inline constexpr ::std::string_view proximity_sensor = "Proximity Sensor";
+
+inline constexpr ::std::string_view simple_ammeter = "Simple Ammeter";
+inline constexpr ::std::string_view simple_voltmeter = "Simple Voltmeter";
+inline constexpr ::std::string_view microammeter = "Microammeter";
+inline constexpr ::std::string_view galvanometer = "Galvanometer";
+inline constexpr ::std::string_view multimeter = "Multimeter";
+inline constexpr ::std::string_view electricity_meter = "Electricity Meter";
+inline constexpr ::std::string_view simple_instrument = "Simple Instrument";
+
+// Components & Sources
+inline constexpr ::std::string_view basic_diode = "Basic Diode";
+inline constexpr ::std::string_view light_emitting_diode = "Light-Emitting Diode";
+inline constexpr ::std::string_view color_light_emitting_diode = "Color Light-Emitting Diode";
+inline constexpr ::std::string_view dual_light_emitting_diode = "Dual Light-Emitting Diode";
+inline constexpr ::std::string_view photodiode = "Photodiode";
+
+inline constexpr ::std::string_view current_source = "Current Source";
+inline constexpr ::std::string_view sinewave_source = "Sinewave Source";
+inline constexpr ::std::string_view square_source = "Square Source";
+inline constexpr ::std::string_view sawtooth_source = "Sawtooth Source";
+inline constexpr ::std::string_view triangle_source = "Triangle Source";
+inline constexpr ::std::string_view pulse_source = "Pulse Source";
+inline constexpr ::std::string_view student_source = "Student Source";
+
+inline constexpr ::std::string_view spdt_switch = "SPDT Switch";
+inline constexpr ::std::string_view dpdt_switch = "DPDT Switch";
+inline constexpr ::std::string_view spark_gap = "Spark Gap";
+
+inline constexpr ::std::string_view photoresistor = "Photoresistor";
+inline constexpr ::std::string_view slide_rheostat = "Slide Rheostat";
+inline constexpr ::std::string_view resistance_box = "Resistance Box";
+inline constexpr ::std::string_view resistance_law = "Resistance Law";
+
+inline constexpr ::std::string_view solenoid = "Solenoid";
+inline constexpr ::std::string_view tesla_coil = "Tesla Coil";
+inline constexpr ::std::string_view tapped_transformer = "Tapped Transformer";
+
+inline constexpr ::std::string_view incandescent_lamp = "Incandescent Lamp";
+inline constexpr ::std::string_view electric_bell = "Electric Bell";
+inline constexpr ::std::string_view electric_fan = "Electric Fan";
+inline constexpr ::std::string_view musical_box = "Musical Box";
+inline constexpr ::std::string_view buzzer = "Buzzer";
+inline constexpr ::std::string_view fuse_component = "Fuse Component";
+
+inline constexpr ::std::string_view transistor = "Transistor";
+inline constexpr ::std::string_view n_mosfet = "N-MOSFET";
+inline constexpr ::std::string_view p_mosfet = "P-MOSFET";
+inline constexpr ::std::string_view operational_amplifier = "Operational Amplifier";
+inline constexpr ::std::string_view relay_component = "Relay Component";
+
+inline constexpr ::std::string_view timer_555 = "555 Timer";
 }  // namespace phy_engine::phy_lab_wrapper::pl_model_id

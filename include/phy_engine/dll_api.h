@@ -67,6 +67,8 @@ extern "C"
 
         // Controllers / switches
         PHY_ENGINE_E_SWITCH_SPST = 12,  // properties: cut_through (0/1)
+        PHY_ENGINE_E_SWITCH_SPDT = 24,  // properties: cut_through (0/1)
+        PHY_ENGINE_E_SWITCH_DPDT = 25,  // properties: cut_through (0/1)
 
         // Non-linear
         PHY_ENGINE_E_PN_JUNCTION = 13,  // properties: Is,N,Isr,Nr,Temp,Ibv,Bv,Bv_set(0/1),Area
