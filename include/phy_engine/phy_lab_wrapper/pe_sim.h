@@ -192,11 +192,23 @@ inline status_or<code_and_props> to_phy_engine_code_and_props_ec(json const& ele
     }
 
     // Controller
-    if (model_id == "Simple Switch" || model_id == "Push Switch" || model_id == "Air Switch")
+    if (model_id == "Simple Switch")
     {
         auto st = get_required_int01_ec(element_data, "开关");
         if(!st) { return st.st; }
         return code_and_props{PHY_ENGINE_E_SWITCH_SPST, { static_cast<double>(*st.value) }};
+    }
+    if (model_id == "Air Switch")
+    {
+        auto st = get_required_int01_ec(element_data, "开关");
+        if(!st) { return st.st; }
+        return code_and_props{PHY_ENGINE_E_AIR_SWITCH, { static_cast<double>(*st.value) }};
+    }
+    if (model_id == "Push Switch")
+    {
+        auto st = get_required_int01_ec(element_data, "开关");
+        if(!st) { return st.st; }
+        return code_and_props{PHY_ENGINE_E_PUSH_SWITCH, { static_cast<double>(*st.value) }};
     }
 
     // Coupled devices
@@ -260,37 +272,119 @@ inline status_or<code_and_props> to_phy_engine_code_and_props_ec(json const& ele
     if (model_id == "JK Flipflop") return code_and_props{PHY_ENGINE_E_DIGITAL_JKFF, {}};
 
     // Higher-level modules are expanded by the adapter (see `circuit::build_`).
-    if (model_id == "Counter" || model_id == "Random Generator" || model_id == "8bit Input" || model_id == "8bit Display")
+    if (model_id == "Counter" || model_id == "Random Generator")
     {
         return err(std::errc::invalid_argument, "internal: high-level module should be expanded by adapter: " + model_id);
     }
 
-    // ---- Sensors (modeled as variable voltage sources or resistors) ----
-    if (model_id == "Accelerometer" || model_id == "Attitude Sensor" || 
-        model_id == "Gravity Sensor" || model_id == "Gyroscope" || 
-        model_id == "Linear Accelerometer" || model_id == "Magnetic Field Sensor" || 
-        model_id == "Proximity Sensor")
+    // ---- Sensors ----
+    if (model_id == "Analog Joystick")
+    {
+        auto v = get_required_float_ec(element_data, "电阻");
+        if(!v) { return v.st; }
+        return code_and_props{PHY_ENGINE_E_ANALOG_JOYSTICK, { *v.value }};
+    }
+    if (model_id == "Attitude Sensor")
+    {
+        auto v = get_required_float_ec(element_data, "电压");
+        if(!v) { return v.st; }
+        return code_and_props{PHY_ENGINE_E_ATTITUDE_SENSOR, { *v.value }};
+    }
+    if (model_id == "Gravity Sensor")
+    {
+        auto v = get_required_float_ec(element_data, "电压");
+        if(!v) { return v.st; }
+        return code_and_props{PHY_ENGINE_E_GRAVITY_SENSOR, { *v.value }};
+    }
+    if (model_id == "Gyroscope")
+    {
+        auto v = get_required_float_ec(element_data, "电压");
+        if(!v) { return v.st; }
+        return code_and_props{PHY_ENGINE_E_GYROSCOPE, { *v.value }};
+    }
+    if (model_id == "Linear Accelerometer")
+    {
+        auto v = get_required_float_ec(element_data, "电压");
+        if(!v) { return v.st; }
+        return code_and_props{PHY_ENGINE_E_LINEAR_ACCELEROMETER, { *v.value }};
+    }
+    if (model_id == "Magnetic Field Sensor")
+    {
+        auto v = get_required_float_ec(element_data, "电压");
+        if(!v) { return v.st; }
+        return code_and_props{PHY_ENGINE_E_MAGNETIC_FIELD_SENSOR, { *v.value }};
+    }
+    if (model_id == "Photodiode")
+    {
+        auto v = get_required_float_ec(element_data, "电流");
+        if(!v) { return v.st; }
+        return code_and_props{PHY_ENGINE_E_PHOTO_DIODE, { *v.value }};
+    }
+    if (model_id == "Proximity Sensor")
+    {
+        auto v = get_required_float_ec(element_data, "电压");
+        if(!v) { return v.st; }
+        return code_and_props{PHY_ENGINE_E_PROXIMITY_SENSOR, { *v.value }};
+    }
+    if (model_id == "Accelerometer")
     {
         auto v = get_required_float_ec(element_data, "电压");
         if(!v) { return v.st; }
         return code_and_props{PHY_ENGINE_E_VDC, { *v.value }};
     }
 
-    // ---- Meters & Instruments (modeled as resistors with measurement) ----
-    if (model_id == "Simple Ammeter" || model_id == "Simple Voltmeter" || 
-        model_id == "Microammeter" || model_id == "Galvanometer" || 
-        model_id == "Multimeter" || model_id == "Electricity Meter" || 
-        model_id == "Simple Instrument")
+    // ---- Meters & Instruments ----
+    if (model_id == "Electricity Meter")
     {
         auto r = get_required_float_ec(element_data, "电阻");
-        if(!r) { return r.st; }
-        return code_and_props{PHY_ENGINE_E_RESISTOR, { *r.value }};
+        double val = r ? *r.value : 1e-6;
+        return code_and_props{PHY_ENGINE_E_ELECTRICITY_METER, { val }};
+    }
+    if (model_id == "Simple Ammeter")
+    {
+        auto r = get_required_float_ec(element_data, "电阻");
+        double val = r ? *r.value : 1e-6;
+        return code_and_props{PHY_ENGINE_E_RESISTOR, { val }};
+    }
+    if (model_id == "Galvanometer")
+    {
+        auto r = get_required_float_ec(element_data, "电阻");
+        double val = r ? *r.value : 1e-6;
+        return code_and_props{PHY_ENGINE_E_GALVANOMETER, { val }};
+    }
+    if (model_id == "Microammeter")
+    {
+        auto r = get_required_float_ec(element_data, "电阻");
+        double val = r ? *r.value : 1e-6;
+        return code_and_props{PHY_ENGINE_E_MICROAMMETER, { val }};
+    }
+    if (model_id == "Multimeter")
+    {
+        auto r = get_required_float_ec(element_data, "电阻");
+        double val = r ? *r.value : 1e-6;
+        return code_and_props{PHY_ENGINE_E_MULTIMETER, { val }};
+    }
+    if (model_id == "Resistance Box")
+    {
+        auto r = get_required_float_ec(element_data, "电阻");
+        double val = r ? *r.value : 1e-6;
+        return code_and_props{PHY_ENGINE_E_RESISTANCE_BOX, { val }};
+    }
+    if (model_id == "Simple Voltmeter")
+    {
+        auto r = get_required_float_ec(element_data, "电阻");
+        double val = r ? *r.value : 1e6;
+        return code_and_props{PHY_ENGINE_E_SIMPLE_VOLTMETER, { val }};
+    }
+    if (model_id == "Simple Instrument")
+    {
+        auto r = get_required_float_ec(element_data, "电阻");
+        double val = r ? *r.value : 1e-6;
+        return code_and_props{PHY_ENGINE_E_SIMPLE_INSTRUMENT, { val }};
     }
 
     // ---- Diodes & LEDs ----
-    if (model_id == "Basic Diode" || model_id == "Light-Emitting Diode" || 
-        model_id == "Color Light-Emitting Diode" || model_id == "Dual Light-Emitting Diode" || 
-        model_id == "Photodiode")
+    if (model_id == "Basic Diode" || model_id == "Photodiode")
     {
         return code_and_props{PHY_ENGINE_E_PN_JUNCTION, {1e-14, 1.0, 1e-14, 1.0, 27.0, 1e-3, 5.0, 0.0, 1.0}};
     }
@@ -376,12 +470,17 @@ inline status_or<code_and_props> to_phy_engine_code_and_props_ec(json const& ele
     }
 
     // ---- Switches ----
-    if (model_id == "SPDT Switch" || model_id == "DPDT Switch")
+    if (model_id == "SPDT Switch")
     {
         auto st = get_required_int01_ec(element_data, "开关");
         if(!st) { return st.st; }
-        int code = (model_id == "SPDT Switch") ? PHY_ENGINE_E_SWITCH_SPDT : PHY_ENGINE_E_SWITCH_DPDT;
-        return code_and_props{code, { static_cast<double>(*st.value) }};
+        return code_and_props{PHY_ENGINE_E_SWITCH_SPDT, { static_cast<double>(*st.value) }};
+    }
+    if (model_id == "DPDT Switch")
+    {
+        auto st = get_required_int01_ec(element_data, "开关");
+        if(!st) { return st.st; }
+        return code_and_props{PHY_ENGINE_E_SWITCH_DPDT, { static_cast<double>(*st.value) }};
     }
     if (model_id == "Spark Gap")
     {
@@ -391,18 +490,27 @@ inline status_or<code_and_props> to_phy_engine_code_and_props_ec(json const& ele
     }
 
     // ---- Variable Resistors & Passive Components ----
-    if (model_id == "Photoresistor" || model_id == "Slide Rheostat" || 
-        model_id == "Resistance Box" || model_id == "Resistance Law" || 
-        model_id == "Incandescent Lamp" || model_id == "Fuse Component")
+    if (model_id == "Photoresistor" || model_id == "Resistance Box")
     {
         auto r = get_required_float_ec(element_data, "电阻");
         if(!r) { return r.st; }
         return code_and_props{PHY_ENGINE_E_RESISTOR, { *r.value }};
     }
+    if (model_id == "Fuse Component")
+    {
+        auto r = get_required_float_ec(element_data, "电阻");
+        if(!r) { return code_and_props{PHY_ENGINE_E_FUSE_COMPONENT, { 0.001 }}; }
+        return code_and_props{PHY_ENGINE_E_FUSE_COMPONENT, { *r.value }};
+    }
+    if (model_id == "Slide Rheostat")
+    {
+        auto r = get_required_float_ec(element_data, "电阻");
+        if(!r) { return r.st; }
+        return code_and_props{PHY_ENGINE_E_SLIDE_RHEOSTAT, { *r.value }};
+    }
 
     // ---- Inductive Loads ----
-    if (model_id == "Solenoid" || model_id == "Electric Bell" || 
-        model_id == "Electric Fan" || model_id == "Musical Box" || model_id == "Buzzer")
+    if (model_id == "Solenoid")
     {
         auto l = get_required_float_ec(element_data, "电感");
         if(!l) { return l.st; }
@@ -546,7 +654,43 @@ inline status_or<std::size_t> expected_prop_arity_ec(int element_code) noexcept
         case PHY_ENGINE_E_BSIM3V32_PMOS: return 13;
         case PHY_ENGINE_E_DIGITAL_EIGHT_BIT_INPUT: return 1;
         case PHY_ENGINE_E_DIGITAL_EIGHT_BIT_DISPLAY: return 0;
-        case PHY_ENGINE_E_DIGITAL_SCHMITT_TRIGGER: return 4;
+        case PHY_ENGINE_E_DIGITAL_SCHMITT_TRIGGER: return 5;
+        
+        // New loads and displays
+        case PHY_ENGINE_E_BUZZER: return 1;
+        case PHY_ENGINE_E_COLOR_LIGHT_EMITTING_DIODE: return 9;
+        case PHY_ENGINE_E_DUAL_LIGHT_EMITTING_DIODE: return 9;
+        case PHY_ENGINE_E_ELECTRIC_BELL: return 1;
+        case PHY_ENGINE_E_ELECTRIC_FAN: return 1;
+        case PHY_ENGINE_E_INCANDESCENT_LAMP: return 1;
+        case PHY_ENGINE_E_MUSICAL_BOX: return 1;
+        case PHY_ENGINE_E_LIGHT_EMITTING_DIODE: return 9;
+        case PHY_ENGINE_E_RESISTANCE_LAW: return 1;
+        
+        // Sensors
+        case PHY_ENGINE_E_ANALOG_JOYSTICK: return 1;
+        case PHY_ENGINE_E_ATTITUDE_SENSOR: return 1;
+        case PHY_ENGINE_E_GRAVITY_SENSOR: return 1;
+        case PHY_ENGINE_E_GYROSCOPE: return 1;
+        case PHY_ENGINE_E_LINEAR_ACCELEROMETER: return 1;
+        case PHY_ENGINE_E_MAGNETIC_FIELD_SENSOR: return 1;
+        case PHY_ENGINE_E_PHOTO_DIODE: return 1;
+        case PHY_ENGINE_E_PROXIMITY_SENSOR: return 1;
+        
+        // Instruments
+        case PHY_ENGINE_E_ELECTRICITY_METER: return 1;
+        case PHY_ENGINE_E_GALVANOMETER: return 1;
+        case PHY_ENGINE_E_MICROAMMETER: return 1;
+        case PHY_ENGINE_E_MULTIMETER: return 1;
+        case PHY_ENGINE_E_RESISTANCE_BOX: return 1;
+        case PHY_ENGINE_E_SIMPLE_VOLTMETER: return 1;
+        case PHY_ENGINE_E_SIMPLE_INSTRUMENT: return 1;
+        
+        // Additional switches and components
+        case PHY_ENGINE_E_AIR_SWITCH: return 1;
+        case PHY_ENGINE_E_PUSH_SWITCH: return 1;
+        case PHY_ENGINE_E_FUSE_COMPONENT: return 1;
+        case PHY_ENGINE_E_SLIDE_RHEOSTAT: return 1;
         
         default: return err(std::errc::invalid_argument, "unknown property arity for PE element code: " + std::to_string(element_code));
     }
@@ -1194,7 +1338,83 @@ private:
                 pin_map[pl_id][1] = endpoint{fs, 4};  // Bout -> bout
                 continue;
             }
-// 1:1 element mapping
+    // ---- 8bit Input / Display ----
+    if (model_id == "8bit Input")
+    {
+        auto v = get_required_float_ec(element_data, "值").value_or(0.0);
+        return code_and_props{PHY_ENGINE_E_DIGITAL_EIGHT_BIT_INPUT, { v }};
+    }
+    if (model_id == "8bit Display")
+    {
+        return code_and_props{PHY_ENGINE_E_DIGITAL_EIGHT_BIT_DISPLAY, {}};
+    }
+
+    // ---- Comparator & Schmitt Trigger ----
+    if (model_id == "Comparator")
+    {
+        auto ll = get_required_float_ec(element_data, "低电平").value_or(0.0);
+        auto hl = get_required_float_ec(element_data, "高电平").value_or(5.0);
+        return code_and_props{PHY_ENGINE_E_COMPARATOR, { ll, hl }};
+    }
+    if (model_id == "Schmitt Trigger")
+    {
+        auto vth_low = get_required_float_ec(element_data, "低阈值").value_or(1.0);
+        auto vth_high = get_required_float_ec(element_data, "高阈值").value_or(4.0);
+        auto inverted = get_required_float_ec(element_data, "反相").value_or(0.0);
+        auto ll = get_required_float_ec(element_data, "低电平").value_or(0.0);
+        auto hl = get_required_float_ec(element_data, "高电平").value_or(5.0);
+        return code_and_props{PHY_ENGINE_E_DIGITAL_SCHMITT_TRIGGER, { vth_low, vth_high, inverted, ll, hl }};
+    }
+
+    // ---- Loads ----
+    if (model_id == "Buzzer")
+    {
+        auto r = get_required_float_ec(element_data, "电阻").value_or(50.0);
+        return code_and_props{PHY_ENGINE_E_BUZZER, { r }};
+    }
+    if (model_id == "Electric Bell")
+    {
+        auto r = get_required_float_ec(element_data, "电阻").value_or(50.0);
+        return code_and_props{PHY_ENGINE_E_ELECTRIC_BELL, { r }};
+    }
+    if (model_id == "Electric Fan")
+    {
+        auto r = get_required_float_ec(element_data, "电阻").value_or(50.0);
+        return code_and_props{PHY_ENGINE_E_ELECTRIC_FAN, { r }};
+    }
+    if (model_id == "Incandescent Lamp")
+    {
+        auto r = get_required_float_ec(element_data, "电阻").value_or(100.0);
+        return code_and_props{PHY_ENGINE_E_INCANDESCENT_LAMP, { r }};
+    }
+    if (model_id == "Musical Box")
+    {
+        auto r = get_required_float_ec(element_data, "电阻").value_or(50.0);
+        return code_and_props{PHY_ENGINE_E_MUSICAL_BOX, { r }};
+    }
+
+    // ---- LEDs ----
+    if (model_id == "Light-Emitting Diode")
+    {
+        return code_and_props{PHY_ENGINE_E_LIGHT_EMITTING_DIODE, {1e-14, 1.0, 1e-14, 1.0, 27.0, 1e-3, 5.0, 0.0, 1.0}};
+    }
+    if (model_id == "Color Light-Emitting Diode")
+    {
+        return code_and_props{PHY_ENGINE_E_COLOR_LIGHT_EMITTING_DIODE, {1e-14, 1.0, 1e-14, 1.0, 27.0, 1e-3, 5.0, 0.0, 1.0}};
+    }
+    if (model_id == "Dual Light-Emitting Diode")
+    {
+        return code_and_props{PHY_ENGINE_E_DUAL_LIGHT_EMITTING_DIODE, {1e-14, 1.0, 1e-14, 1.0, 27.0, 1e-3, 5.0, 0.0, 1.0}};
+    }
+
+    // ---- Resistance Law ----
+    if (model_id == "Resistance Law")
+    {
+        auto r = get_required_float_ec(element_data, "电阻").value_or(100.0);
+        return code_and_props{PHY_ENGINE_E_RESISTANCE_LAW, { r }};
+    }
+
+    // 1:1 element mapping
             auto cp = detail::to_phy_engine_code_and_props_ec(e.data());
             if(!cp) { return cp.st; }
             auto idx_r = add_pe_element(cp.value->code, std::move(cp.value->props), pl_id);
