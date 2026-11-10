@@ -134,42 +134,6 @@ extern "C"
         PHY_ENGINE_E_VERILOG_MODULE = 300,
         // Verilog module synthesized into PE digital primitives (supported via `create_circuit_ex`)
         PHY_ENGINE_E_VERILOG_NETLIST = 301,
-
-        // Sensors
-        PHY_ENGINE_E_ANALOG_JOYSTICK = 302,       // properties: R
-        PHY_ENGINE_E_ATTITUDE_SENSOR = 303,       // properties: V
-        PHY_ENGINE_E_GRAVITY_SENSOR = 304,        // properties: V
-        PHY_ENGINE_E_GYROSCOPE = 305,             // properties: V
-        PHY_ENGINE_E_LINEAR_ACCELEROMETER = 306,  // properties: V
-        PHY_ENGINE_E_MAGNETIC_FIELD_SENSOR = 307, // properties: V
-        PHY_ENGINE_E_PHOTO_DIODE = 308,           // properties: I
-        PHY_ENGINE_E_PROXIMITY_SENSOR = 309,      // properties: V
-
-        // Instruments
-        PHY_ENGINE_E_ELECTRICITY_METER = 310,     // properties: r
-        PHY_ENGINE_E_GALVANOMETER = 311,          // properties: r
-        PHY_ENGINE_E_MICROAMMETER = 312,          // properties: r
-        PHY_ENGINE_E_MULTIMETER = 313,            // properties: r
-        PHY_ENGINE_E_RESISTANCE_BOX = 314,        // properties: r
-        PHY_ENGINE_E_SIMPLE_VOLTMETER = 315,      // properties: r
-        PHY_ENGINE_E_SIMPLE_INSTRUMENT = 316,     // properties: r
-
-        // Additional switches and components
-        PHY_ENGINE_E_AIR_SWITCH = 317,            // properties: cut_through (0/1)
-        PHY_ENGINE_E_PUSH_SWITCH = 318,           // properties: cut_through (0/1)
-        PHY_ENGINE_E_FUSE_COMPONENT = 319,        // properties: r
-        PHY_ENGINE_E_SLIDE_RHEOSTAT = 320,        // properties: r
-
-        // Additional loads and displays
-        PHY_ENGINE_E_BUZZER = 321,                     // properties: r
-        PHY_ENGINE_E_COLOR_LIGHT_EMITTING_DIODE = 322, // properties: Is,N,Isr,Nr,Temp,Ibv,Bv,Bv_set,Area
-        PHY_ENGINE_E_DUAL_LIGHT_EMITTING_DIODE = 323,  // properties: Is,N,Isr,Nr,Temp,Ibv,Bv,Bv_set,Area
-        PHY_ENGINE_E_ELECTRIC_BELL = 324,              // properties: r
-        PHY_ENGINE_E_ELECTRIC_FAN = 325,               // properties: r
-        PHY_ENGINE_E_INCANDESCENT_LAMP = 326,          // properties: r
-        PHY_ENGINE_E_MUSICAL_BOX = 327,                // properties: r
-        PHY_ENGINE_E_LIGHT_EMITTING_DIODE = 328,       // properties: Is,N,Isr,Nr,Temp,Ibv,Bv,Bv_set,Area
-        PHY_ENGINE_E_RESISTANCE_LAW = 329,             // properties: r
     };
 
     // Create a circuit from element codes + wire connections.
