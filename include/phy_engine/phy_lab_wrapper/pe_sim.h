@@ -260,7 +260,8 @@ inline status_or<code_and_props> to_phy_engine_code_and_props_ec(json const& ele
     if (model_id == "JK Flipflop") return code_and_props{PHY_ENGINE_E_DIGITAL_JKFF, {}};
 
     // Higher-level modules are expanded by the adapter (see `circuit::build_`).
-    if (model_id == "Counter" || model_id == "Random Generator" || model_id == "Analog Joystick")
+    if (model_id == "Counter" || model_id == "Random Generator" || model_id == "Analog Joystick" ||
+        model_id == "Slide Rheostat")
     {
         return err(std::errc::invalid_argument, "internal: high-level module should be expanded by adapter: " + model_id);
     }
@@ -401,9 +402,8 @@ inline status_or<code_and_props> to_phy_engine_code_and_props_ec(json const& ele
     }
 
     // ---- Variable Resistors & Passive Components ----
-    if (model_id == "Photoresistor" || model_id == "Slide Rheostat" || 
-        model_id == "Resistance Box" || model_id == "Resistance Law" || 
-        model_id == "Incandescent Lamp" || model_id == "Fuse Component")
+    // Slide Rheostat is expanded by the adapter (see `circuit::build_`).
+    if (model_id == "Photoresistor" || model_id == "Resistance Box" || model_id == "Resistance Law" || model_id == "Incandescent Lamp" || model_id == "Fuse Component")
     {
         auto r = get_required_float_ec(element_data, "电阻");
         if(!r) { return r.st; }
@@ -1155,6 +1155,39 @@ private:
                 pin_map[pl_id][3] = endpoint{ry_top, 0};  // Y1 (axis end)
                 pin_map[pl_id][4] = endpoint{ry_top, 1};  // Y2 (wiper)
                 pin_map[pl_id][5] = endpoint{ry_bot, 1};  // Y3 (axis end)
+                continue;
+            }
+
+            // ---- Macro: Slide Rheostat (resistor pair with a movable tap) ----
+            // Catalog pins 0..3 are unnamed ("Pin 1".."Pin 4" at identical positions), so the
+            // adapter fixes a convention: 0=end A, 1/2=wiper taps, 3=end B. The two tap pins
+            // share the wiper node. Slider fraction "滑块" (fallback "比例", default 0.5,
+            // clamped to [0,1]) is the resistance share below the wiper, i.e. a potentiometer
+            // output ratio: R(A->wiper) = R*(1-f), R(wiper->B) = R*f.
+            // "电阻" is the total end-to-end resistance (default 10e3 when missing).
+            if (model_id == "Slide Rheostat")
+            {
+                auto r_req = detail::get_required_float_ec(e.data(), "电阻");
+                double const r_total = r_req ? *r_req.value : 10e3;
+                auto frac_req = detail::get_required_float_ec(e.data(), "滑块");
+                if(!frac_req) { frac_req = detail::get_required_float_ec(e.data(), "比例"); }
+                double frac = frac_req ? *frac_req.value : 0.5;
+                if(frac < 0.0) frac = 0.0; if(frac > 1.0) frac = 1.0;  // negative resistance would break the matrix
+
+                auto r_top_r = add_pe_element(PHY_ENGINE_E_RESISTOR, {r_total * (1.0 - frac)}, "");
+                if(!r_top_r) { return r_top_r.st; }
+                auto r_top = *r_top_r.value;
+                auto r_bot_r = add_pe_element(PHY_ENGINE_E_RESISTOR, {r_total * frac}, "");
+                if(!r_bot_r) { return r_bot_r.st; }
+                auto r_bot = *r_bot_r.value;
+
+                // Tie the wiper-side pins into one node.
+                add_wire(endpoint{r_top, 1}, endpoint{r_bot, 0});
+
+                pin_map[pl_id][0] = endpoint{r_top, 0};  // end A
+                pin_map[pl_id][1] = endpoint{r_top, 1};  // tap 1 (wiper)
+                pin_map[pl_id][2] = endpoint{r_top, 1};  // tap 2 (wiper)
+                pin_map[pl_id][3] = endpoint{r_bot, 1};  // end B
                 continue;
             }
 
