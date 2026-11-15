@@ -4,6 +4,14 @@ HEAD 已回到 `eaeb072` 的映射策略：Web ModelID 只别名到**工厂已�
 
 每步做完立刻 commit。一次只动同类型、1–3 个元件。提交必须同时包含：模型（若新建）+ `dll_main.cpp` `add_model_via_code` + `pe_sim.h` 映射/展开 + 一条冒烟测试。
 
+## 进度（2026-11-15）
+
+- 已完成：§0（`cbc8842`、`aeb5ef3`，另含 GCC12 libstdc++ constexpr 兼容修复）；§1.1 Comparator（`83b52f9`）；§1.2 Schmitt（`9ab06b9`）；§1.3 8bit（`6f4f1c7`）；§2.1 SPDT（`85e122c`）；§2.2 DPDT（`62f7b09`）；§3.1 Joystick（`46ec03a`）；§3.2 Slide Rheostat（`d3a9422`）。
+- 遗留发现：comparator/schmitt 输出脚接模拟负载会触发混合节点重复驱动导致的奇异矩阵，冒烟均走纯数字路径采样；引擎侧去重属后续引擎修复，不在元件映射范围。
+- §3.3 Dual LED：保持 PN_JUNCTION 1:1，等 Unity 语义确认。
+- §4 555：公开渠道查不到 PL 引脚顺序（catalog `pins: []`、chips.json 无 555、glb 是 LFS 桩），维持封锁；需真机 `.sav` 或 Unity 源码后按「比较器×2 + SR 锁存 + 放电开关」模拟核实现。
+- §5 电表/传感器/灯：维持别名，单开后续批次。
+
 ## 0. 先修编译（单独一笔）
 
 `pe_sim.h` 里 `Transistor` 对 `status_or` 调了不存在的 `value_or`。改成失败时用默认值：
