@@ -430,11 +430,16 @@ inline status_or<code_and_props> to_phy_engine_code_and_props_ec(json const& ele
     // ---- Semiconductors ----
     if (model_id == "Transistor")
     {
-        auto is_val = get_required_float_ec(element_data, "Is").value_or(1e-14);
-        auto n_val = get_required_float_ec(element_data, "N").value_or(1.0);
-        auto beta_val = get_required_float_ec(element_data, "BetaF").value_or(100.0);
-        auto temp_val = get_required_float_ec(element_data, "Temp").value_or(27.0);
-        auto area_val = get_required_float_ec(element_data, "Area").value_or(1.0);
+        auto is_r = get_required_float_ec(element_data, "Is");
+        double is_val = is_r ? *is_r.value : 1e-14;
+        auto n_r = get_required_float_ec(element_data, "N");
+        double n_val = n_r ? *n_r.value : 1.0;
+        auto beta_r = get_required_float_ec(element_data, "BetaF");
+        double beta_val = beta_r ? *beta_r.value : 100.0;
+        auto temp_r = get_required_float_ec(element_data, "Temp");
+        double temp_val = temp_r ? *temp_r.value : 27.0;
+        auto area_r = get_required_float_ec(element_data, "Area");
+        double area_val = area_r ? *area_r.value : 1.0;
         return code_and_props{PHY_ENGINE_E_BJT_NPN, { is_val, n_val, beta_val, temp_val, area_val }};
     }
     if (model_id == "N-MOSFET")
@@ -546,7 +551,7 @@ inline status_or<std::size_t> expected_prop_arity_ec(int element_code) noexcept
         case PHY_ENGINE_E_BSIM3V32_PMOS: return 13;
         case PHY_ENGINE_E_DIGITAL_EIGHT_BIT_INPUT: return 1;
         case PHY_ENGINE_E_DIGITAL_EIGHT_BIT_DISPLAY: return 0;
-        case PHY_ENGINE_E_DIGITAL_SCHMITT_TRIGGER: return 4;
+        case PHY_ENGINE_E_DIGITAL_SCHMITT_TRIGGER: return 5;
         
         default: return err(std::errc::invalid_argument, "unknown property arity for PE element code: " + std::to_string(element_code));
     }
