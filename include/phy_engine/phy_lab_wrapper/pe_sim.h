@@ -260,10 +260,20 @@ inline status_or<code_and_props> to_phy_engine_code_and_props_ec(json const& ele
     if (model_id == "JK Flipflop") return code_and_props{PHY_ENGINE_E_DIGITAL_JKFF, {}};
 
     // Higher-level modules are expanded by the adapter (see `circuit::build_`).
-    if (model_id == "Counter" || model_id == "Random Generator" || model_id == "8bit Input" || model_id == "8bit Display")
+    if (model_id == "Counter" || model_id == "Random Generator")
     {
         return err(std::errc::invalid_argument, "internal: high-level module should be expanded by adapter: " + model_id);
     }
+
+    // PL pins are MSB-first (pin 0 = bit7 ... pin 7 = bit0), matching PE EIGHT_BIT_INPUT/DISPLAY pin order.
+    if (model_id == "8bit Input")
+    {
+        auto v = get_required_float_ec(element_data, "值");
+        double val = v ? *v.value : 0.0;
+        if(val < 0.0) val = 0.0; if(val > 255.0) val = 255.0;
+        return code_and_props{PHY_ENGINE_E_DIGITAL_EIGHT_BIT_INPUT, { val }};
+    }
+    if (model_id == "8bit Display") return code_and_props{PHY_ENGINE_E_DIGITAL_EIGHT_BIT_DISPLAY, {}};
 
     // ---- Sensors (modeled as variable voltage sources or resistors) ----
     if (model_id == "Accelerometer" || model_id == "Attitude Sensor" || 
