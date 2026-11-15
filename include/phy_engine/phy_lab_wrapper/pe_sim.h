@@ -470,6 +470,14 @@ inline status_or<code_and_props> to_phy_engine_code_and_props_ec(json const& ele
         if(!mu) { return mu.st; }
         return code_and_props{PHY_ENGINE_E_OP_AMP, { *mu.value }};
     }
+    if (model_id == "Comparator")
+    {
+        auto ll = get_required_float_ec(element_data, "Ll");
+        double ll_val = ll ? *ll.value : 0.0;
+        auto hl = get_required_float_ec(element_data, "Hl");
+        double hl_val = hl ? *hl.value : 5.0;
+        return code_and_props{PHY_ENGINE_E_COMPARATOR, { ll_val, hl_val }};
+    }
     if (model_id == "Relay Component")
     {
         auto von = get_required_float_ec(element_data, "导通电压");
