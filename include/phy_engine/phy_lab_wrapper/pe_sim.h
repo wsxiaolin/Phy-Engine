@@ -478,6 +478,20 @@ inline status_or<code_and_props> to_phy_engine_code_and_props_ec(json const& ele
         double hl_val = hl ? *hl.value : 5.0;
         return code_and_props{PHY_ENGINE_E_COMPARATOR, { ll_val, hl_val }};
     }
+    if (model_id == "Schmitt Trigger")
+    {
+        auto vth_low = get_required_float_ec(element_data, "Vth_low");
+        double vth_low_val = vth_low ? *vth_low.value : 1.0;
+        auto vth_high = get_required_float_ec(element_data, "Vth_high");
+        double vth_high_val = vth_high ? *vth_high.value : 2.0;
+        auto inverted = get_required_float_ec(element_data, "inverted");
+        double inverted_val = inverted ? *inverted.value : 0.0;
+        auto ll = get_required_float_ec(element_data, "Ll");
+        double ll_val = ll ? *ll.value : 0.0;
+        auto hl = get_required_float_ec(element_data, "Hl");
+        double hl_val = hl ? *hl.value : 5.0;
+        return code_and_props{PHY_ENGINE_E_DIGITAL_SCHMITT_TRIGGER, { vth_low_val, vth_high_val, inverted_val, ll_val, hl_val }};
+    }
     if (model_id == "Relay Component")
     {
         auto von = get_required_float_ec(element_data, "导通电压");
