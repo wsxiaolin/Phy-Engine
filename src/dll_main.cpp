@@ -21,6 +21,7 @@
 #include <phy_engine/model/models/linear/op_amp.h>
 
 #include <phy_engine/model/models/controller/spdt_switch.h>
+#include <phy_engine/model/models/controller/dpdt_switch.h>
 #include <phy_engine/model/models/controller/relay.h>
 #include <phy_engine/model/models/controller/comparator.h>
 
@@ -1877,6 +1878,12 @@ void build_netlist_from_wires(phy_engine::netlist::netlist& nl,
             // SPDT switch: 0/1
             double const v = *((*curr_prop_ptr)++);
             return add_model(nl, ::phy_engine::model::spdt_switch{.cut_through = (v != 0.0)});
+        }
+        case 25:
+        {
+            // DPDT switch: 0/1
+            double const v = *((*curr_prop_ptr)++);
+            return add_model(nl, ::phy_engine::model::dpdt_switch{.cut_through = (v != 0.0)});
         }
         case 50:
         {
