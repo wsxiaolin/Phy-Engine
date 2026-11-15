@@ -260,7 +260,7 @@ inline status_or<code_and_props> to_phy_engine_code_and_props_ec(json const& ele
     if (model_id == "JK Flipflop") return code_and_props{PHY_ENGINE_E_DIGITAL_JKFF, {}};
 
     // Higher-level modules are expanded by the adapter (see `circuit::build_`).
-    if (model_id == "Counter" || model_id == "Random Generator")
+    if (model_id == "Counter" || model_id == "Random Generator" || model_id == "Analog Joystick")
     {
         return err(std::errc::invalid_argument, "internal: high-level module should be expanded by adapter: " + model_id);
     }
@@ -1119,6 +1119,42 @@ private:
                     auto const1 = *const1_r.value;
                     add_wire(endpoint{const1, 0}, endpoint{rng, 5});
                 }
+                continue;
+            }
+
+            // ---- Macro: Analog Joystick (two independent voltage-divider potentiometers) ----
+            // Catalog pin order 0..5: X1,X2,X3,Y1,Y2,Y3. Each axis is a resistor pair with
+            // the middle pin as the wiper: X1 --[R/2]-- X2 --[R/2]-- X3 (same for Y).
+            // "电阻" is the total per-axis resistance (default 10e3 when missing).
+            if (model_id == "Analog Joystick")
+            {
+                auto r_axis = detail::get_required_float_ec(e.data(), "电阻");
+                double const r_total = r_axis ? *r_axis.value : 10e3;
+                double const r_half = r_total / 2.0;
+
+                auto rx_top_r = add_pe_element(PHY_ENGINE_E_RESISTOR, {r_half}, "");
+                if(!rx_top_r) { return rx_top_r.st; }
+                auto rx_top = *rx_top_r.value;
+                auto rx_bot_r = add_pe_element(PHY_ENGINE_E_RESISTOR, {r_half}, "");
+                if(!rx_bot_r) { return rx_bot_r.st; }
+                auto rx_bot = *rx_bot_r.value;
+                auto ry_top_r = add_pe_element(PHY_ENGINE_E_RESISTOR, {r_half}, "");
+                if(!ry_top_r) { return ry_top_r.st; }
+                auto ry_top = *ry_top_r.value;
+                auto ry_bot_r = add_pe_element(PHY_ENGINE_E_RESISTOR, {r_half}, "");
+                if(!ry_bot_r) { return ry_bot_r.st; }
+                auto ry_bot = *ry_bot_r.value;
+
+                // Tie the wiper-side pins of each divider into one node.
+                add_wire(endpoint{rx_top, 1}, endpoint{rx_bot, 0});
+                add_wire(endpoint{ry_top, 1}, endpoint{ry_bot, 0});
+
+                pin_map[pl_id][0] = endpoint{rx_top, 0};  // X1 (axis end)
+                pin_map[pl_id][1] = endpoint{rx_top, 1};  // X2 (wiper)
+                pin_map[pl_id][2] = endpoint{rx_bot, 1};  // X3 (axis end)
+                pin_map[pl_id][3] = endpoint{ry_top, 0};  // Y1 (axis end)
+                pin_map[pl_id][4] = endpoint{ry_top, 1};  // Y2 (wiper)
+                pin_map[pl_id][5] = endpoint{ry_bot, 1};  // Y3 (axis end)
                 continue;
             }
 
