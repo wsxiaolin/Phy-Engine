@@ -20,6 +20,7 @@
 #include <phy_engine/model/models/linear/coupled_inductors.h>
 #include <phy_engine/model/models/linear/op_amp.h>
 
+#include <phy_engine/model/models/controller/spdt_switch.h>
 #include <phy_engine/model/models/controller/relay.h>
 #include <phy_engine/model/models/controller/comparator.h>
 
@@ -1870,6 +1871,12 @@ void build_netlist_from_wires(phy_engine::netlist::netlist& nl,
             g.freq = *((*curr_prop_ptr)++);
             g.phase = *((*curr_prop_ptr)++);
             return add_model(nl, ::std::move(g));
+        }
+        case 24:
+        {
+            // SPDT switch: 0/1
+            double const v = *((*curr_prop_ptr)++);
+            return add_model(nl, ::phy_engine::model::spdt_switch{.cut_through = (v != 0.0)});
         }
         case 50:
         {

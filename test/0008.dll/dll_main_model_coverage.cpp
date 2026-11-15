@@ -52,10 +52,11 @@ int main()
 
         203, 204, 205, 206, 207, 208, 209, 210, 211, 212,  // digital logical
         220, 221, 222, 223, 224, 225, 226, 227, 228,       // digital combinational
+        24,                                                // switch_spdt
     };
 
     // Property stream (positional), consumed only by the analog/non-linear models above.
-    // Total = 42 doubles.
+    // Total = 43 doubles.
     double props[] = {
         // 16: transformer_center_tap.n_total
         10.0,
@@ -111,6 +112,8 @@ int main()
         1e-3,
         0.01,
         0.9,
+        // 24: switch_spdt: cut_through (0/1)
+        1.0,
     };
 
     ::std::size_t* vec_pos{};
