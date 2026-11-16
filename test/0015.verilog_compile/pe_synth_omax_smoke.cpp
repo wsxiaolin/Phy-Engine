@@ -125,8 +125,8 @@ endmodule
         .allow_multi_driver = false,
         .assume_binary_inputs = true,
         .opt_level = opt_level,
-        .omax_max_iter = 2,       // keep the test fast
         .omax_timeout_ms = 0,     // deterministic for CI
+        .omax_max_iter = 2,       // keep the test fast
         .omax_randomize = false,  // Omax should not be worse than O3 by default
         .omax_verify = (opt_level >= 4),
         .omax_verify_exact_max_inputs = 12,  // 6 inputs => exhaustive check (fast)
