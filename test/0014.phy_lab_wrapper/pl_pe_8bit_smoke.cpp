@@ -16,7 +16,7 @@ int main()
     auto disp = ex.add_circuit_element("8bit Display", position{1.0, 0.0, 0.0});
 
     // 0xA5 = b7..b0 = 1,0,1,0,0,1,0,1
-    ex.get_element(in).data()["Properties"]["值"] = 165;
+    ex.get_element(in).data()["Properties"]["十进制"] = 165;
 
     // PL pin 0 = bit7 ... PL pin 7 = bit0 (MSB-first), matching PE pin order 1:1.
     for (int pin = 0; pin < 8; ++pin)

@@ -269,7 +269,8 @@ inline status_or<code_and_props> to_phy_engine_code_and_props_ec(json const& ele
     // PL pins are MSB-first (pin 0 = bit7 ... pin 7 = bit0), matching PE EIGHT_BIT_INPUT/DISPLAY pin order.
     if (model_id == "8bit Input")
     {
-        auto v = get_required_float_ec(element_data, "值");
+        // PL stores the byte value under "十进制" (see physicslab.h default props for "8bit Input").
+        auto v = get_required_float_ec(element_data, "十进制");
         double val = v ? *v.value : 0.0;
         if(val < 0.0) val = 0.0; if(val > 255.0) val = 255.0;
         return code_and_props{PHY_ENGINE_E_DIGITAL_EIGHT_BIT_INPUT, { val }};
@@ -482,9 +483,13 @@ inline status_or<code_and_props> to_phy_engine_code_and_props_ec(json const& ele
     }
     if (model_id == "Comparator")
     {
-        auto ll = get_required_float_ec(element_data, "Ll");
+        // PL uses "低电平"/"高电平" (see pe_to_pl.h write-back and physicslab.h defaults);
+        // "Ll"/"Hl" are kept as a fallback for legacy fixtures.
+        auto ll = get_required_float_ec(element_data, "低电平");
+        if(!ll) { ll = get_required_float_ec(element_data, "Ll"); }
         double ll_val = ll ? *ll.value : 0.0;
-        auto hl = get_required_float_ec(element_data, "Hl");
+        auto hl = get_required_float_ec(element_data, "高电平");
+        if(!hl) { hl = get_required_float_ec(element_data, "Hl"); }
         double hl_val = hl ? *hl.value : 5.0;
         return code_and_props{PHY_ENGINE_E_COMPARATOR, { ll_val, hl_val }};
     }
@@ -496,9 +501,11 @@ inline status_or<code_and_props> to_phy_engine_code_and_props_ec(json const& ele
         double vth_high_val = vth_high ? *vth_high.value : 2.0;
         auto inverted = get_required_float_ec(element_data, "inverted");
         double inverted_val = inverted ? *inverted.value : 0.0;
-        auto ll = get_required_float_ec(element_data, "Ll");
+        auto ll = get_required_float_ec(element_data, "低电平");
+        if(!ll) { ll = get_required_float_ec(element_data, "Ll"); }
         double ll_val = ll ? *ll.value : 0.0;
-        auto hl = get_required_float_ec(element_data, "Hl");
+        auto hl = get_required_float_ec(element_data, "高电平");
+        if(!hl) { hl = get_required_float_ec(element_data, "Hl"); }
         double hl_val = hl ? *hl.value : 5.0;
         return code_and_props{PHY_ENGINE_E_DIGITAL_SCHMITT_TRIGGER, { vth_low_val, vth_high_val, inverted_val, ll_val, hl_val }};
     }
@@ -1172,7 +1179,9 @@ private:
                 auto frac_req = detail::get_required_float_ec(e.data(), "滑块");
                 if(!frac_req) { frac_req = detail::get_required_float_ec(e.data(), "比例"); }
                 double frac = frac_req ? *frac_req.value : 0.5;
-                if(frac < 0.0) frac = 0.0; if(frac > 1.0) frac = 1.0;  // negative resistance would break the matrix
+                // Clamp to an open interval: frac==0 or 1 would make one branch 0 ohm,
+                // and resistance.h computes G = 1/R, so 0 ohm becomes +inf and poisons the matrix.
+                if(frac < 1e-6) frac = 1e-6; if(frac > 1.0 - 1e-6) frac = 1.0 - 1e-6;
 
                 auto r_top_r = add_pe_element(PHY_ENGINE_E_RESISTOR, {r_total * (1.0 - frac)}, "");
                 if(!r_top_r) { return r_top_r.st; }
@@ -1192,6 +1201,35 @@ private:
             }
 
             
+
+            // ---- Explicit pin maps for multi-pin switches ----
+            // The 1:1 default maps PL pin N to PE pin N, which only works while the PL
+            // catalog order matches the model's pins[]. Record the convention explicitly
+            // so a catalog reorder fails loudly here instead of silently miswiring.
+            // SPDT: 0=COM, 1=NO, 2=NC (matches spdt_switch::pins).
+            // DPDT: 0=COM1, 1=NO1, 2=NC1, 3=COM2, 4=NO2, 5=NC2 (matches dpdt_switch::pins).
+            if (model_id == "SPDT Switch" || model_id == "DPDT Switch")
+            {
+                auto cp = detail::to_phy_engine_code_and_props_ec(e.data());
+                if(!cp) { return cp.st; }
+                auto idx_r = add_pe_element(cp.value->code, std::move(cp.value->props), pl_id);
+                if(!idx_r) { return idx_r.st; }
+                auto idx = *idx_r.value;
+                auto& pm = pin_map[pl_id];
+                int const pin_count = (model_id == "SPDT Switch") ? 3 : 6;
+                if (auto it_used = pl_pin_used.find(pl_id); it_used != pl_pin_used.end())
+                {
+                    for (auto const& [pin, used] : it_used->second)
+                    {
+                        if (used)
+                        {
+                            if (pin >= pin_count) { return detail::err(std::errc::invalid_argument, std::string(model_id) + " pin out of range: " + std::to_string(pin)); }
+                            pm[pin] = endpoint{idx, pin};
+                        }
+                    }
+                }
+                continue;
+            }
 
             // ---- PL macro: D Flipflop (DFF + optional ~Q inverter) ----
             // physicsLab pin order:

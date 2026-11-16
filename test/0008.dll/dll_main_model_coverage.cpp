@@ -54,10 +54,13 @@ int main()
         220, 221, 222, 223, 224, 225, 226, 227, 228,       // digital combinational
         24,  // switch_spdt
         25,  // switch_dpdt
+        231, // digital_eight_bit_input
+        232, // digital_eight_bit_display
+        233, // digital_schmitt_trigger
     };
 
     // Property stream (positional), consumed only by the analog/non-linear models above.
-    // Total = 44 doubles.
+    // Total = 50 doubles.
     double props[] = {
         // 16: transformer_center_tap.n_total
         10.0,
@@ -117,6 +120,14 @@ int main()
         1.0,
         // 25: switch_dpdt: cut_through (0/1)
         1.0,
+        // 231: digital_eight_bit_input.value (0xA5)
+        165.0,
+        // 233: digital_schmitt_trigger: Vth_low, Vth_high, inverted, Ll, Hl
+        1.0,
+        2.0,
+        0.0,
+        0.0,
+        5.0,
     };
 
     ::std::size_t* vec_pos{};
