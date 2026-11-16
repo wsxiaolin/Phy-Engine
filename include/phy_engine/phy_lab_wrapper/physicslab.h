@@ -597,6 +597,16 @@ public:
             props = json{{"电阻", 0.001}, {"锁定", 1.0}};
             stats = json{{"电流", 0.0}, {"电压", 0.0}, {"功率", 0.0}};
         }
+        else if (mid == "Photoresistor")
+        {
+            props = json{{"电阻", 10000.0}, {"锁定", 1.0}};
+            stats = json{{"电流", 0.0}, {"电压", 0.0}, {"功率", 0.0}};
+        }
+        else if (mid == "Incandescent Lamp")
+        {
+            props = json{{"电阻", 10.0}, {"锁定", 1.0}};
+            stats = json{{"电流", 0.0}, {"电压", 0.0}, {"功率", 0.0}};
+        }
         else if (mid == "Logic Output")
         {
             props = json{{"状态", 0.0}, {"高电平", 3.0}, {"低电平", 0.0}, {"锁定", 1.0}};

@@ -417,11 +417,29 @@ inline status_or<code_and_props> to_phy_engine_code_and_props_ec(json const& ele
 
     // ---- Variable Resistors & Passive Components ----
     // Slide Rheostat is expanded by the adapter (see `circuit::build_`).
-    if (model_id == "Photoresistor" || model_id == "Resistance Box" || model_id == "Resistance Law" || model_id == "Incandescent Lamp" || model_id == "Fuse Component")
+    // PL only ships a default "电阻" template for plain "Resistor", so for these
+    // components a missing key used to abort the whole build. Fall back to a
+    // plausible value and clamp to a positive minimum (resistance.h uses G = 1/R).
+    if (model_id == "Photoresistor")
     {
         auto r = get_required_float_ec(element_data, "电阻");
-        if(!r) { return r.st; }
-        return code_and_props{PHY_ENGINE_E_RESISTOR, { *r.value }};
+        double r_val = r ? *r.value : 10e3;
+        if(!(r_val > 0.0)) { r_val = 1e-3; }
+        return code_and_props{PHY_ENGINE_E_RESISTOR, { r_val }};
+    }
+    if (model_id == "Incandescent Lamp")
+    {
+        auto r = get_required_float_ec(element_data, "电阻");
+        double r_val = r ? *r.value : 10.0;
+        if(!(r_val > 0.0)) { r_val = 1e-3; }
+        return code_and_props{PHY_ENGINE_E_RESISTOR, { r_val }};
+    }
+    if (model_id == "Resistance Box" || model_id == "Resistance Law" || model_id == "Fuse Component")
+    {
+        auto r = get_required_float_ec(element_data, "电阻");
+        double r_val = r ? *r.value : 1000.0;
+        if(!(r_val > 0.0)) { r_val = 1e-3; }
+        return code_and_props{PHY_ENGINE_E_RESISTOR, { r_val }};
     }
 
     // ---- Inductive Loads ----
