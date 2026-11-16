@@ -289,14 +289,27 @@ inline status_or<code_and_props> to_phy_engine_code_and_props_ec(json const& ele
     }
 
     // ---- Meters & Instruments (modeled as resistors with measurement) ----
-    if (model_id == "Simple Ammeter" || model_id == "Simple Voltmeter" || 
-        model_id == "Microammeter" || model_id == "Galvanometer" || 
-        model_id == "Multimeter" || model_id == "Electricity Meter" || 
-        model_id == "Simple Instrument")
+    // PL has no default "电阻" template for instruments, so a missing key used to abort the
+    // whole build. Fall back to a realistic internal resistance instead:
+    //   voltmeter-class: high impedance so it loads the circuit as little as possible
+    //   ammeter-class:   small series resistance (non-zero, since resistance.h does G = 1/R)
+    if (model_id == "Simple Voltmeter")
     {
         auto r = get_required_float_ec(element_data, "电阻");
-        if(!r) { return r.st; }
-        return code_and_props{PHY_ENGINE_E_RESISTOR, { *r.value }};
+        double const r_val = r ? *r.value : 1e6;
+        return code_and_props{PHY_ENGINE_E_RESISTOR, { r_val }};
+    }
+    if (model_id == "Simple Ammeter" || model_id == "Microammeter" || model_id == "Galvanometer")
+    {
+        auto r = get_required_float_ec(element_data, "电阻");
+        double const r_val = r ? *r.value : 1e-3;
+        return code_and_props{PHY_ENGINE_E_RESISTOR, { r_val }};
+    }
+    if (model_id == "Multimeter" || model_id == "Electricity Meter" || model_id == "Simple Instrument")
+    {
+        auto r = get_required_float_ec(element_data, "电阻");
+        double const r_val = r ? *r.value : 1e6;
+        return code_and_props{PHY_ENGINE_E_RESISTOR, { r_val }};
     }
 
     // ---- Diodes & LEDs ----

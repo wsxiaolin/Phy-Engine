@@ -585,6 +585,18 @@ public:
             props = json{{"电阻", 1000.0}, {"锁定", 1.0}};
             stats = json{{"电流", 0.0}, {"电压", 0.0}, {"功率", 0.0}};
         }
+        else if (mid == "Simple Voltmeter" || mid == "Multimeter" || mid == "Electricity Meter" || mid == "Simple Instrument")
+        {
+            // Voltmeter-class instruments: high internal resistance by default.
+            props = json{{"电阻", 1000000.0}, {"锁定", 1.0}};
+            stats = json{{"电流", 0.0}, {"电压", 0.0}, {"功率", 0.0}};
+        }
+        else if (mid == "Simple Ammeter" || mid == "Microammeter" || mid == "Galvanometer")
+        {
+            // Ammeter-class instruments: small series resistance by default (never 0 ohm).
+            props = json{{"电阻", 0.001}, {"锁定", 1.0}};
+            stats = json{{"电流", 0.0}, {"电压", 0.0}, {"功率", 0.0}};
+        }
         else if (mid == "Logic Output")
         {
             props = json{{"状态", 0.0}, {"高电平", 3.0}, {"低电平", 0.0}, {"锁定", 1.0}};
