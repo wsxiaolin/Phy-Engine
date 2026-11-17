@@ -226,7 +226,9 @@ int main()
     auto const o3 = run_once(3);
     if(!o3) { return 1; }
 
-    auto const omax = run_once(4);
+    // Omax is opt level 5 in the engine (`is_omax = raw_lvl >= 5`); level 4 is the O4
+    // fixpoint and never fills the Omax report traces this test checks.
+    auto const omax = run_once(5);
     if(!omax) { return 2; }
 
     if(omax->gate_count > o3->gate_count)
