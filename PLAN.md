@@ -20,6 +20,10 @@ HEAD 已回到 `eaeb072` 的映射策略：Web ModelID 只别名到**工厂已�
 - §5.C Photodiode 展开：**暂缓**。全仓库（include/documents/test/custom/python）搜不到任何光电流属性键证据（`光照`/`照度`/`光强`/`光电流` 均零命中），`PLAN.md:143` 也写明「先对 Unity 属性键」。已试做过「PN_JUNCTION + IDC」宏展开，因缺少真机数据无法验证 IDC 极性/拓扑，冒烟测试正偏 0.7 V、反偏 0 V 均不符合物理预期，已回退，未提交。前置：真机 `.sav` 或 Unity prefab 确认键名与量纲。
 - 构建环境：本机 GCC 12 开 OpenMP 编译 `pe_synth.h` 会报 `expected '=' before '{'`（`_Pragma` + `__VA_ARGS__` 展开），属工具链兼容问题，验证时用 `-DPHY_ENGINE_ENABLE_OPENMP=OFF`。仓库当前无 CI workflow（`08d693f` 已移除）。
 
+## 进度（2026-11-17）
+
+- §4 555 解除封锁。依据 Unity 仓库 `Physics-Lab` 反编译确证的 `TimerChip`：8 脚顺序为 `V+, Dis, Thr, Ctrl, Trig, Out, Reset, Ground`；行为为内部 5k/10k 分压（Ctrl = 2/3 Vcc）+ 上一轮引脚电压驱动的 `out` 状态（Thr > Ctrl 置低、Ctrl/2 > Trig 置高、Reset < 0.7 + Ground 优先置低）+ `!out` 时 Dis 对地 10Ω、Out 经 1Ω 接 V+/地。已新增 `timer555` 模型、工厂码 26、PL 映射与 `pl_pe_555_smoke`。
+
 ## 0. 先修编译（单独一笔）
 
 `pe_sim.h` 里 `Transistor` 对 `status_or` 调了不存在的 `value_or`。改成失败时用默认值：

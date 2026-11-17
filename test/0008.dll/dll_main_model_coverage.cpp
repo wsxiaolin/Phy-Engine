@@ -57,10 +57,11 @@ int main()
         231, // digital_eight_bit_input
         232, // digital_eight_bit_display
         233, // digital_schmitt_trigger
+        26,  // timer555
     };
 
     // Property stream (positional), consumed only by the analog/non-linear models above.
-    // Total = 50 doubles.
+    // Total = 52 doubles.
     double props[] = {
         // 16: transformer_center_tap.n_total
         10.0,
@@ -128,6 +129,9 @@ int main()
         0.0,
         0.0,
         5.0,
+        // 26: timer555: Hl, Ll
+        3.3,
+        0.2,
     };
 
     ::std::size_t* vec_pos{};
@@ -178,6 +182,12 @@ int main()
     {
         destroy_circuit(cptr, vec_pos, chunk_pos);
         return 9;
+    }
+    // 26: timer555.Hl / timer555.Ll (last element in the stream)
+    if(!near(get_attr_d(c, vec_pos[37], chunk_pos[37], 0), 3.3) || !near(get_attr_d(c, vec_pos[37], chunk_pos[37], 1), 0.2))
+    {
+        destroy_circuit(cptr, vec_pos, chunk_pos);
+        return 11;
     }
 
     // Ensure all models were created (including digital blocks with no property consumption).
