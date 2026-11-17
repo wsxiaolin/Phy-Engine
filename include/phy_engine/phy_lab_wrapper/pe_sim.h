@@ -550,7 +550,12 @@ inline status_or<code_and_props> to_phy_engine_code_and_props_ec(json const& ele
     }
     if (model_id == "555 Timer")
     {
-        return err(std::errc::invalid_argument, "555 Timer requires macro expansion or Verilog module; direct 1:1 mapping not supported");
+        // PL exposes "高电平"/"低电平" (defaults 3/0) plus a non-simulated "锁定" flag.
+        auto hl = get_required_float_ec(element_data, "高电平");
+        double const hl_val = hl ? *hl.value : 3.0;
+        auto ll = get_required_float_ec(element_data, "低电平");
+        double const ll_val = ll ? *ll.value : 0.0;
+        return code_and_props{PHY_ENGINE_E_TIMER555, { hl_val, ll_val }};
     }
 
     return err(std::errc::invalid_argument, "Phy-Engine backend does not support element ModelID=" + model_id);
@@ -605,6 +610,7 @@ inline status_or<std::size_t> expected_prop_arity_ec(int element_code) noexcept
         case PHY_ENGINE_E_CCVS: return 1;
         case PHY_ENGINE_E_SWITCH_SPDT: return 1;
         case PHY_ENGINE_E_SWITCH_DPDT: return 1;
+        case PHY_ENGINE_E_TIMER555: return 2;
         case PHY_ENGINE_E_TRANSFORMER_CENTER_TAP: return 1;
         case PHY_ENGINE_E_OP_AMP: return 1;
         case PHY_ENGINE_E_RELAY: return 2;
@@ -1255,6 +1261,32 @@ private:
                         if (used)
                         {
                             if (pin >= pin_count) { return detail::err(std::errc::invalid_argument, std::string(model_id) + " pin out of range: " + std::to_string(pin)); }
+                            pm[pin] = endpoint{idx, pin};
+                        }
+                    }
+                }
+                continue;
+            }
+
+            // ---- Explicit pin map for the 555 timer ----
+            // PL catalog order matches timer555::pins 1:1:
+            //   0=V+, 1=Dis, 2=Thr, 3=Ctrl, 4=Trig, 5=Out, 6=Reset, 7=Ground.
+            // Unconnected pins are fine (the model supplies an internal Ctrl node); out-of-range fails loudly.
+            if (model_id == "555 Timer")
+            {
+                auto cp = detail::to_phy_engine_code_and_props_ec(e.data());
+                if(!cp) { return cp.st; }
+                auto idx_r = add_pe_element(cp.value->code, std::move(cp.value->props), pl_id);
+                if(!idx_r) { return idx_r.st; }
+                auto idx = *idx_r.value;
+                auto& pm = pin_map[pl_id];
+                if (auto it_used = pl_pin_used.find(pl_id); it_used != pl_pin_used.end())
+                {
+                    for (auto const& [pin, used] : it_used->second)
+                    {
+                        if (used)
+                        {
+                            if (pin >= 8) { return detail::err(std::errc::invalid_argument, "555 Timer pin out of range: " + std::to_string(pin)); }
                             pm[pin] = endpoint{idx, pin};
                         }
                     }

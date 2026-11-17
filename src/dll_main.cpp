@@ -33,6 +33,7 @@
 #include <phy_engine/model/models/controller/dpdt_switch.h>
 #include <phy_engine/model/models/controller/relay.h>
 #include <phy_engine/model/models/controller/comparator.h>
+#include <phy_engine/model/models/controller/timer555.h>
 
 #include <phy_engine/model/models/generator/sawtooth.h>
 #include <phy_engine/model/models/generator/square.h>
@@ -1905,6 +1906,14 @@ void build_netlist_from_wires(phy_engine::netlist::netlist& nl,
             // DPDT switch: 0/1
             double const v = *((*curr_prop_ptr)++);
             return add_model(nl, ::phy_engine::model::dpdt_switch{.cut_through = (v != 0.0)});
+        }
+        case 26:
+        {
+            // 555 timer: Hl, Ll
+            ::phy_engine::model::timer555 t{};
+            t.Hl = *((*curr_prop_ptr)++);
+            t.Ll = *((*curr_prop_ptr)++);
+            return add_model(nl, ::std::move(t));
         }
         case 50:
         {
