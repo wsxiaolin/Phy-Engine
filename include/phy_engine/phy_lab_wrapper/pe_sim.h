@@ -145,6 +145,26 @@ inline status_or<int> get_required_int01_ec(json const& element_data, std::strin
     return (*v.value != 0.0) ? 1 : 0;
 }
 
+// Optional numeric read: returns false when the key is absent, true + value when present.
+inline bool get_optional_float(json const& element_data, std::string_view key, double& out) noexcept
+{
+    auto it = element_data.find("Properties");
+    if (it == element_data.end() || !it->is_object()) { return false; }
+    auto it_props = it->find(std::string(key));
+    if (it_props == it->end()) { return false; }
+    auto r = to_double_ec(*it_props);
+    if(!r) { return false; }
+    out = *r.value;
+    return true;
+}
+
+// Unity exposes "理想模式" == 1 to switch an instrument to its ideal topology.
+inline bool is_ideal(json const& element_data) noexcept
+{
+    double v{};
+    return get_optional_float(element_data, "理想模式", v) && v == 1.0;
+}
+
 struct code_and_props
 {
     int code{};
@@ -288,24 +308,18 @@ inline status_or<code_and_props> to_phy_engine_code_and_props_ec(json const& ele
         return code_and_props{PHY_ENGINE_E_VDC, { *v.value }};
     }
 
-    // ---- Meters & Instruments (modeled as resistors with measurement) ----
-    // PL has no default "电阻" template for instruments, so a missing key used to abort the
-    // whole build. Fall back to a realistic internal resistance instead:
-    //   voltmeter-class: high impedance so it loads the circuit as little as possible
-    //   ammeter-class:   small series resistance (non-zero, since resistance.h does G = 1/R)
-    if (model_id == "Simple Voltmeter")
+    // ---- Meters & Instruments ----
+    // The 3-pin meters (Simple Ammeter / Simple Voltmeter / Galvanometer / Microammeter),
+    // the 2-pin Multimeter and the 4-pin Electricity Meter are reconstructed from the
+    // Unity Physics Lab topologies. They become several RESISTOR (and, for the Multimeter,
+    // VDC) elements inside `circuit::build_`, so a 1:1 alias would silently drop pins.
+    if (model_id == "Simple Voltmeter" || model_id == "Simple Ammeter" || model_id == "Microammeter" ||
+        model_id == "Galvanometer" || model_id == "Multimeter" || model_id == "Electricity Meter")
     {
-        auto r = get_required_float_ec(element_data, "电阻");
-        double const r_val = r ? *r.value : 1e6;
-        return code_and_props{PHY_ENGINE_E_RESISTOR, { r_val }};
+        return err(std::errc::invalid_argument, "internal: high-level module should be expanded by adapter: " + model_id);
     }
-    if (model_id == "Simple Ammeter" || model_id == "Microammeter" || model_id == "Galvanometer")
-    {
-        auto r = get_required_float_ec(element_data, "电阻");
-        double const r_val = r ? *r.value : 1e-3;
-        return code_and_props{PHY_ENGINE_E_RESISTOR, { r_val }};
-    }
-    if (model_id == "Multimeter" || model_id == "Electricity Meter" || model_id == "Simple Instrument")
+    // "Simple Instrument" has no Unity counterpart topology; keep the legacy high-impedance alias.
+    if (model_id == "Simple Instrument")
     {
         auto r = get_required_float_ec(element_data, "电阻");
         double const r_val = r ? *r.value : 1e6;
@@ -1264,6 +1278,76 @@ private:
                 pin_map[pl_id][1] = endpoint{r_top, 1};  // tap 1 (wiper)
                 pin_map[pl_id][2] = endpoint{r_top, 1};  // tap 2 (wiper)
                 pin_map[pl_id][3] = endpoint{r_bot, 1};  // end B
+                continue;
+            }
+
+            // ---- Macro: 3-pin moving-coil ammeters (Simple Ammeter / Galvanometer / Microammeter) ----
+            // Unity Physics Lab topology:
+            //   SimpleAmmeter: pin0 = common (-), pin1 = 0.6 A tap (+), pin2 = 3 A tap (+).
+            //     Realistic mode is the closed delta R1(pin1->pin0)=1/72, R2(pin1->pin2)=0.1,
+            //     R3(pin2->pin0)=0.025; ideal mode is a single 1e-6 movement on pin1->pin0 with
+            //     pin2 shorted to pin1 (ResistorElement negatives/positives joined).
+            //   Galvanometer / Microammeter: R1(pin1->pin0) = movement, R2(pin2->pin1) = series
+            //     resistor, shares one node at pin1.
+            //
+            // All values are Unity's *realistic* ones (resistance.h does G = 1/R, so never 0).
+            // Unity exposes ideal mode via Properties["理想模式"] == 1; honour it when present.
+            if (model_id == "Simple Ammeter" || model_id == "Galvanometer" || model_id == "Microammeter")
+            {
+                bool const ideal = detail::is_ideal(e.data());
+
+                if (model_id == "Simple Ammeter")
+                {
+                    // Realistic: delta of 1/72, 0.1, 0.025 ohm. Ideal: single 1e-6 movement with
+                    // pin2 tied to pin1 (same effective 1e-6 between the two live terminals).
+                    double r_movement = 1.0 / 72.0;
+                    double r_shunt_a = 0.1;
+                    double r_shunt_b = 0.025;
+                    if (ideal)
+                    {
+                        r_movement = 1e-6;
+                        r_shunt_a = 1e-6;
+                        r_shunt_b = 1e-6;
+                    }
+                    auto r1_r = add_pe_element(PHY_ENGINE_E_RESISTOR, {r_movement}, "");
+                    if(!r1_r) { return r1_r.st; }
+                    auto r1 = *r1_r.value;
+                    auto r2_r = add_pe_element(PHY_ENGINE_E_RESISTOR, {r_shunt_a}, "");
+                    if(!r2_r) { return r2_r.st; }
+                    auto r2 = *r2_r.value;
+                    auto r3_r = add_pe_element(PHY_ENGINE_E_RESISTOR, {r_shunt_b}, "");
+                    if(!r3_r) { return r3_r.st; }
+                    auto r3 = *r3_r.value;
+
+                    // Unity: R1(+)=pin1, R1(-)=pin0; R2(+)=pin1, R2(-)=pin2; R3(+)=pin2, R3(-)=pin0.
+                    // Union the shared terminals into PE nodes with explicit wires.
+                    add_wire(endpoint{r1, 0}, endpoint{r2, 0});  // node pin1
+                    add_wire(endpoint{r1, 1}, endpoint{r3, 1});  // node pin0
+                    add_wire(endpoint{r2, 1}, endpoint{r3, 0});  // node pin2
+
+                    pin_map[pl_id][0] = endpoint{r1, 1};  // pin0 common -
+                    pin_map[pl_id][1] = endpoint{r1, 0};  // pin1 0.6 A +
+                    pin_map[pl_id][2] = endpoint{r2, 1};  // pin2 3 A +
+                    continue;
+                }
+
+                // Galvanometer: 100 / 2400. Microammeter: 500 / 2000.
+                double r_movement = (model_id == "Galvanometer") ? 100.0 : 500.0;
+                double r_series = (model_id == "Galvanometer") ? 2400.0 : 2000.0;
+                if (ideal) { r_movement = 1e-6; r_series = 1e-6; }
+
+                auto r1_r = add_pe_element(PHY_ENGINE_E_RESISTOR, {r_movement}, "");
+                if(!r1_r) { return r1_r.st; }
+                auto r1 = *r1_r.value;
+                auto r2_r = add_pe_element(PHY_ENGINE_E_RESISTOR, {r_series}, "");
+                if(!r2_r) { return r2_r.st; }
+                auto r2 = *r2_r.value;
+
+                // Unity: R1(pin1, pin0), R2(pin2, pin1), R1(+)-R2(-) joined -> node pin1.
+                add_wire(endpoint{r1, 0}, endpoint{r2, 1});
+                pin_map[pl_id][0] = endpoint{r1, 1};  // pin0 common -
+                pin_map[pl_id][1] = endpoint{r1, 0};  // pin1 +
+                pin_map[pl_id][2] = endpoint{r2, 0};  // pin2 range + 
                 continue;
             }
 
