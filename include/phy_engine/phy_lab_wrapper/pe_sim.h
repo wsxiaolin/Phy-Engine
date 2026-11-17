@@ -1351,6 +1351,83 @@ private:
                 continue;
             }
 
+            // ---- Macro: Simple Voltmeter (3000 ohm movement + 12000 ohm 15 V range tap) ----
+            // Unity SimpleVoltmeter: pin0 = common (-), pin1 = 3 V tap (+), pin2 = 15 V tap (+).
+            // Realistic mode: 3000 ohm between pin1 and pin0, 12000 ohm between pin2 and pin1.
+            // Ideal mode: 1e6 ohm movement on pin1-pin0, pin2 tied to pin1.
+            if (model_id == "Simple Voltmeter")
+            {
+                bool const ideal = detail::is_ideal(e.data());
+                double const r_movement = ideal ? 1e6 : 3000.0;
+                double const r_range = ideal ? 1e-6 : 12000.0;
+
+                auto r1_r = add_pe_element(PHY_ENGINE_E_RESISTOR, {r_movement}, "");
+                if(!r1_r) { return r1_r.st; }
+                auto r1 = *r1_r.value;
+                auto r2_r = add_pe_element(PHY_ENGINE_E_RESISTOR, {r_range}, "");
+                if(!r2_r) { return r2_r.st; }
+                auto r2 = *r2_r.value;
+
+                // Unity: Resistor1(pin1 -> pin0), Resistor2(pin2 -> pin1), joined at pin1.
+                add_wire(endpoint{r2, 1}, endpoint{r1, 0});
+                pin_map[pl_id][0] = endpoint{r1, 1};  // pin0 common -
+                pin_map[pl_id][1] = endpoint{r1, 0};  // pin1 3 V +
+                pin_map[pl_id][2] = endpoint{r2, 0};  // pin2 15 V +
+                continue;
+            }
+
+            // ---- Macro: Multimeter (single resistor selected by the 状态 dial) ----
+            // Unity Multimeter has 18 dial positions; the internal resistance is one of
+            // 1e9 (voltage/off ranges), 1e-9 (current ranges) or 1 (resistance ranges).
+            // 1e-9 ohm would drive resistance.h's G = 1/R to 1e9 and wreck the matrix, so
+            // clamp the current ranges to 1e-6 ohm (still effectively a short).
+            if (model_id == "Multimeter")
+            {
+                double state{};
+                if (!detail::get_optional_float(e.data(), "状态", state)) { state = 0.0; }
+                int const dial = (state >= 0.0 && state <= 17.0) ? static_cast<int>(state) : 0;
+
+                double r{};
+                if (dial == 0 || (dial >= 1 && dial <= 2) || (dial >= 13 && dial <= 17))
+                {
+                    r = 1e9;      // off / DC-AC voltage ranges
+                }
+                else if (dial >= 3 && dial <= 7)
+                {
+                    r = 1e-6;     // DC current ranges (Unity uses 1e-9)
+                }
+                else
+                {
+                    r = 1.0;      // resistance ranges
+                }
+
+                auto r_r = add_pe_element(PHY_ENGINE_E_RESISTOR, {r}, pl_id);
+                if(!r_r) { return r_r.st; }
+                auto idx = *r_r.value;
+                pin_map[pl_id][0] = endpoint{idx, 0};
+                pin_map[pl_id][1] = endpoint{idx, 1};
+                continue;
+            }
+
+            // ---- Macro: Electricity Meter (voltage coil + current coil) ----
+            // Unity ElectricityMeter: 4 pins, voltage coil 1e9 ohm across pin0-pin1 and
+            // current coil 0.01 ohm through pin2-pin3.
+            if (model_id == "Electricity Meter")
+            {
+                auto vc_r = add_pe_element(PHY_ENGINE_E_RESISTOR, {1e9}, "");
+                if(!vc_r) { return vc_r.st; }
+                auto vc = *vc_r.value;
+                auto ic_r = add_pe_element(PHY_ENGINE_E_RESISTOR, {0.01}, "");
+                if(!ic_r) { return ic_r.st; }
+                auto ic = *ic_r.value;
+
+                pin_map[pl_id][0] = endpoint{vc, 0};  // pin0 voltage coil +
+                pin_map[pl_id][1] = endpoint{vc, 1};  // pin1 voltage coil -
+                pin_map[pl_id][2] = endpoint{ic, 0};  // pin2 current coil +
+                pin_map[pl_id][3] = endpoint{ic, 1};  // pin3 current coil -
+                continue;
+            }
+
             
 
             // ---- Explicit pin maps for multi-pin switches ----
