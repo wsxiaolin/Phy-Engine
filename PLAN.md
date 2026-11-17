@@ -16,7 +16,7 @@ HEAD 已回到 `eaeb072` 的映射策略：Web ModelID 只别名到**工厂已�
 
 - 审查修复：`abca651`（8bit 键 `值`→`十进制`；Comparator/Schmitt 键改 `低电平/高电平` 并回退 `Ll/Hl`；Rheostat frac 钳制开区间避开 0Ω→inf；SPDT/DPDT 显式 pin_map + 越界校验；覆盖测试登记 231/232/233）。
 - §5.A 电表：`31dfa01`。表类 PL 无默认 `电阻` 模板，原先直接构建失败；现电压表类缺省 1e6、电流表类缺省 1e-3（`resistance.h` 是 `G=1/R`，不可为 0）。`physicslab.h` 补同名默认 props。
-- §5.B 光敏电阻/白炽灯：`b4c3362`。同一分支原来缺 `电阻` 即报错；现缺省 10k / 10（电阻箱/电阻定律/保险丝 1k），并对非正阻值钳制到 1e-3。
+- §5.B 光敏电阻/白炽灯：`b4c3362` 初次兜底（缺 `电阻` 即报错 → 缺省 10k / 10，非正阻值钳制 1e-3）；键名依据已由 Unity 源码核实，不再是「待确认」。`IncandescentLamp.cs` 只写 `额定电压`（3）/`额定功率`（0.85），`SyncProperties()` 算 `NominalResistance = U^2/P ≈ 10.588 Ω`；`PhotoResistor.cs` 只写 `亮电阻`（10000）/`暗电阻`（1e6）/`响应时间`（0.03）/`最大电压`（150）/`响应系数`（0.6），实时值走 `GetTarget()` 的分段对数 R(lux) 曲线，显示用 `Statistics["电阻"]`。修正：两元件优先读显式 `电阻`（兼容旧 fixture），否则白炽灯用 `U^2/P`（默认 3/0.85）、光敏电阻用 `亮电阻`（默认 10000，PE 无光照输入，静态取有光的典型工作点），再钳制 > 0。`physicslab.h` 默认 props 同步为 Unity 键集。
 - §5.C Photodiode 展开：**暂缓**。全仓库（include/documents/test/custom/python）搜不到任何光电流属性键证据（`光照`/`照度`/`光强`/`光电流` 均零命中），`PLAN.md:143` 也写明「先对 Unity 属性键」。已试做过「PN_JUNCTION + IDC」宏展开，因缺少真机数据无法验证 IDC 极性/拓扑，冒烟测试正偏 0.7 V、反偏 0 V 均不符合物理预期，已回退，未提交。前置：真机 `.sav` 或 Unity prefab 确认键名与量纲。
 - 构建环境：本机 GCC 12 开 OpenMP 编译 `pe_synth.h` 会报 `expected '=' before '{'`（`_Pragma` + `__VA_ARGS__` 展开），属工具链兼容问题，验证时用 `-DPHY_ENGINE_ENABLE_OPENMP=OFF`。仓库当前无 CI workflow（`08d693f` 已移除）。
 

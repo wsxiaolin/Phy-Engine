@@ -599,12 +599,17 @@ public:
         }
         else if (mid == "Photoresistor")
         {
-            props = json{{"电阻", 10000.0}, {"锁定", 1.0}};
+            // Mirror Unity PhotoResistor.InitializeProperties(): no "电阻" key, the
+            // effective resistance is derived from the light-response properties.
+            props = json{{"亮电阻", 10000.0}, {"暗电阻", 1000000.0}, {"响应时间", 0.03},
+                         {"最大电压", 150.0}, {"响应系数", 0.6}, {"锁定", 1.0}};
             stats = json{{"电流", 0.0}, {"电压", 0.0}, {"功率", 0.0}};
         }
         else if (mid == "Incandescent Lamp")
         {
-            props = json{{"电阻", 10.0}, {"锁定", 1.0}};
+            // Mirror Unity IncandescentLamp.InitializeProperties(): no "电阻" key,
+            // NominalResistance is computed as 额定电压^2 / 额定功率.
+            props = json{{"额定电压", 3.0}, {"额定功率", 0.85}, {"锁定", 1.0}};
             stats = json{{"电流", 0.0}, {"电压", 0.0}, {"功率", 0.0}};
         }
         else if (mid == "Logic Output")

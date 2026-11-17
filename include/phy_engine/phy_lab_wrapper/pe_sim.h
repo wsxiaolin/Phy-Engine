@@ -417,20 +417,46 @@ inline status_or<code_and_props> to_phy_engine_code_and_props_ec(json const& ele
 
     // ---- Variable Resistors & Passive Components ----
     // Slide Rheostat is expanded by the adapter (see `circuit::build_`).
-    // PL only ships a default "电阻" template for plain "Resistor", so for these
-    // components a missing key used to abort the whole build. Fall back to a
-    // plausible value and clamp to a positive minimum (resistance.h uses G = 1/R).
+    // Unity's Photoresistor/IncandescentLamp do not expose a "电阻" property, so a
+    // missing key used to abort the whole build. Each branch below follows Unity's
+    // property set to derive a resistance, then clamps to a positive minimum
+    // (resistance.h uses G = 1/R).
     if (model_id == "Photoresistor")
     {
+        // Unity exposes "亮电阻" (bright resistance, default 10000) and "暗电阻"
+        // (dark resistance, default 1000000); the live value is a piecewise-log
+        // R(lux) curve in PhotoResistor.GetTarget() driven by the ambient light
+        // sensor. PE has no light input yet, so approximate statically with the
+        // bright resistance (the lit operating point). Prefer an explicit "电阻"
+        // for backwards compatibility with older fixtures.
         auto r = get_required_float_ec(element_data, "电阻");
-        double r_val = r ? *r.value : 10e3;
+        double r_val = 0.0;
+        if(r) { r_val = *r.value; }
+        else
+        {
+            auto bright = get_required_float_ec(element_data, "亮电阻");
+            r_val = bright ? *bright.value : 10e3;
+        }
         if(!(r_val > 0.0)) { r_val = 1e-3; }
         return code_and_props{PHY_ENGINE_E_RESISTOR, { r_val }};
     }
     if (model_id == "Incandescent Lamp")
     {
+        // Unity stores "额定电压" (default 3 V) and "额定功率" (default 0.85 W) and
+        // derives NominalResistance = U^2 / P in SyncProperties(). Prefer an explicit
+        // "电阻" for backwards compatibility, otherwise compute U^2/P and fall back
+        // to the default 3^2 / 0.85 ~= 10.588 ohm.
         auto r = get_required_float_ec(element_data, "电阻");
-        double r_val = r ? *r.value : 10.0;
+        double r_val = 0.0;
+        if(r) { r_val = *r.value; }
+        else
+        {
+            auto u = get_required_float_ec(element_data, "额定电压");
+            auto p = get_required_float_ec(element_data, "额定功率");
+            double const u_val = u ? *u.value : 3.0;
+            double const p_val = p ? *p.value : 0.85;
+            r_val = (p_val > 0.0) ? (u_val * u_val / p_val) : 10.588;
+        }
         if(!(r_val > 0.0)) { r_val = 1e-3; }
         return code_and_props{PHY_ENGINE_E_RESISTOR, { r_val }};
     }
