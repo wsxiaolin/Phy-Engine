@@ -313,9 +313,13 @@ inline status_or<code_and_props> to_phy_engine_code_and_props_ec(json const& ele
     }
 
     // ---- Diodes & LEDs ----
+    // Photodiode is a multi-element macro (see `circuit::build_`), so it must not reach here.
+    if (model_id == "Photodiode")
+    {
+        return err(std::errc::invalid_argument, "Photodiode is a high-level module expanded by the adapter; direct 1:1 mapping is not supported");
+    }
     if (model_id == "Basic Diode" || model_id == "Light-Emitting Diode" || 
-        model_id == "Color Light-Emitting Diode" || model_id == "Dual Light-Emitting Diode" || 
-        model_id == "Photodiode")
+        model_id == "Color Light-Emitting Diode" || model_id == "Dual Light-Emitting Diode")
     {
         return code_and_props{PHY_ENGINE_E_PN_JUNCTION, {1e-14, 1.0, 1e-14, 1.0, 27.0, 1e-3, 5.0, 0.0, 1.0}};
     }
@@ -1369,6 +1373,93 @@ private:
                 pin_map[pl_id][1] = endpoint{fs, 4};  // Bout -> bout
                 continue;
             }
+            // ---- Macro: Photodiode (PN junction + series 100 ohm + parallel 1e8 ohm + photocurrent) ----
+            // Mirrors Unity `PhotoDiode.BuildElements`:
+            //   pin0 (anode) = diode anode
+            //   diode cathode --[Rs = 100 ohm]-- pin1 (cathode)
+            //   Rs  = 1e8 ohm in parallel across the two pins (reverse leakage / bias path)
+            //   Isrc = IDC from pin0, so photocurrent leaves pin0 and returns through pin1.
+            //
+            // PL pin convention (fixed by the adapter): 0=anode, 1=cathode.
+            //
+            // PN_JUNCTION takes 9 props: Is,N,Isr,Nr,Temp,Ibv,Bv,Bv_set,Area.
+            // Unity exposes 前向压降/击穿电压, which have no 1:1 counterpart here:
+            //   - 前向压降 (forward drop) is an emergent I-V property, so the stock Is/N curve is kept.
+            //   - 击穿电压 maps to Bv; 0 means "no breakdown" in Unity, i.e. Bv_set=false.
+            // Temp/Ibv/Area keep the same defaults the 1:1 diode mapping uses.
+            //
+            // Photocurrent: Unity computes `亮度 * 响应系数 * 1e-4`. `亮度` is an internal,
+            // time-smoothed value fed from the "light" environment sensor and is never stored
+            // in the .sav, so the adapter cannot reproduce the smoothing. Instead we read an
+            // optional `环境亮度` key (lux) from Properties, else fall back to 0 (dark).
+            if (model_id == "Photodiode")
+            {
+                auto drop_r = detail::get_required_float_ec(e.data(), "前向压降");
+                double const forward_drop = drop_r ? *drop_r.value : 0.6;
+                (void)forward_drop;  // emergent from the PN curve; kept for documentation only.
+
+                auto bv_r = detail::get_required_float_ec(e.data(), "击穿电压");
+                double const breakdown = bv_r ? *bv_r.value : 0.0;
+                bool const bv_set = breakdown > 0.0;
+
+                // 额定电流 is only used by Unity for over-current breakage, which the adapter does not model.
+
+                auto coeff_r = detail::get_required_float_ec(e.data(), "响应系数");
+                double const resp_coeff = coeff_r ? *coeff_r.value : 0.1;
+
+                // Adapter convention: read ambient light (lux) from the optional `环境亮度` property.
+                // Unity's `响应时间` smoothing is not reproduced (no time-stepped sensor loop here).
+                auto lux_r = detail::get_required_float_ec(e.data(), "环境亮度");
+                double const lux = lux_r ? *lux_r.value : 0.0;
+                double const photocurrent = lux * resp_coeff * 1e-4;
+
+                auto pn_r = add_pe_element(PHY_ENGINE_E_PN_JUNCTION,
+                                           {1e-14, 1.0, 1e-14, 1.0, 27.0, 1e-3, breakdown, bv_set ? 1.0 : 0.0, 1.0},
+                                           "");
+                if(!pn_r) { return pn_r.st; }
+                auto pn = *pn_r.value;
+
+                auto rs_r = add_pe_element(PHY_ENGINE_E_RESISTOR, {100.0}, "");
+                if(!rs_r) { return rs_r.st; }
+                auto rs = *rs_r.value;
+
+                auto rp_r = add_pe_element(PHY_ENGINE_E_RESISTOR, {1e8}, "");
+                if(!rp_r) { return rp_r.st; }
+                auto rp = *rp_r.value;
+
+                auto isrc_r = add_pe_element(PHY_ENGINE_E_IDC, {photocurrent}, "");
+                if(!isrc_r) { return isrc_r.st; }
+                auto isrc = *isrc_r.value;
+
+                // Internal node: diode cathode == Rs.0 == Rp.1 == IDC "+".
+                // A reverse-biased photodiode drives conventional current from cathode to
+                // anode inside the device, so the source's "+" sits on the cathode side.
+                endpoint const mid_node{pn, 1};
+                add_wire(mid_node, endpoint{rs, 0});
+                add_wire(mid_node, endpoint{rp, 1});
+                add_wire(mid_node, endpoint{isrc, 0});
+
+                // Anode node: diode anode == Rp.0 == IDC "-".
+                endpoint const anode_node{pn, 0};
+                add_wire(anode_node, endpoint{rp, 0});
+                add_wire(anode_node, endpoint{isrc, 1});
+
+                // Pin mapping: pin0=anode, pin1=cathode; validate against the PL pin usage.
+                if (auto it_used = pl_pin_used.find(pl_id); it_used != pl_pin_used.end())
+                {
+                    for (auto const& [pin, used] : it_used->second)
+                    {
+                        if (used && (pin < 0 || pin > 1))
+                        {
+                            return detail::err(std::errc::invalid_argument, "Photodiode pin out of range: " + std::to_string(pin));
+                        }
+                    }
+                }
+                pin_map[pl_id][0] = endpoint{pn, 0};     // anode
+                pin_map[pl_id][1] = endpoint{rs, 1};     // cathode
+                continue;
+            }
+
 // 1:1 element mapping
             auto cp = detail::to_phy_engine_code_and_props_ec(e.data());
             if(!cp) { return cp.st; }
