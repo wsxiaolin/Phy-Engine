@@ -69,6 +69,9 @@ extern "C"
         PHY_ENGINE_E_SWITCH_SPST = 12,  // properties: cut_through (0/1)
         PHY_ENGINE_E_SWITCH_SPDT = 24,  // properties: cut_through (0/1)
         PHY_ENGINE_E_SWITCH_DPDT = 25,  // properties: cut_through (0/1)
+        // 555 timer: 8 pins (0=V+, 1=Dis, 2=Thr, 3=Ctrl, 4=Trig, 5=Out, 6=Reset, 7=Ground).
+        // properties: Hl,Ll (PL keys: 高电平,低电平). Internal 5k/10k divider and 1 ohm output / 10 ohm discharge stamps are hard-coded.
+        PHY_ENGINE_E_TIMER555 = 26,
 
         // Non-linear
         PHY_ENGINE_E_PN_JUNCTION = 13,  // properties: Is,N,Isr,Nr,Temp,Ibv,Bv,Bv_set(0/1),Area
