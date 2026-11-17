@@ -23,6 +23,7 @@ HEAD 已回到 `eaeb072` 的映射策略：Web ModelID 只别名到**工厂已�
 ## 进度（2026-11-17）
 
 - §4 555 解除封锁。依据 Unity 仓库 `Physics-Lab` 反编译确证的 `TimerChip`：8 脚顺序为 `V+, Dis, Thr, Ctrl, Trig, Out, Reset, Ground`；行为为内部 5k/10k 分压（Ctrl = 2/3 Vcc）+ 上一轮引脚电压驱动的 `out` 状态（Thr > Ctrl 置低、Ctrl/2 > Trig 置高、Reset < 0.7 + Ground 优先置低）+ `!out` 时 Dis 对地 10Ω、Out 经 1Ω 接 V+/地。已新增 `timer555` 模型、工厂码 26、PL 映射与 `pl_pe_555_smoke`。
+- §4 555 复核：`Circuit::Analyze` 会给每个未接线引脚分配独立节点，并把未标记的非内部节点经 1e8Ω 接到节点 0，因此悬空引脚读 ~0V；悬空 Reset 会真实强制 Out 低。`timer555` 用 null 引脚读 0V 与之等价；同时按 `TimerChip.Stamp/Step` 把分压下端改为节点 0、Out 低电平改为接 Ground 引脚。冒烟新增悬空 Reset 用例，锁定该语义。
 
 ## 0. 先修编译（单独一笔）
 

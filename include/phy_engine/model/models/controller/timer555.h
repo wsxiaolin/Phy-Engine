@@ -31,6 +31,23 @@ namespace phy_engine::model
         }
     }
 
+    // Unity stamps every TimerChip lead to a real node: an unconnected lead becomes its own
+    // node tied to node 0 through 1e8 ohm (Circuit::Analyze floating-node pass), so it reads
+    // ~0 V. An unconnected reference pin is therefore equivalent to the ground reference.
+    inline constexpr void timer555_stamp_output(::phy_engine::MNA::MNA& mna,
+                                                ::phy_engine::model::node_t const* node_out,
+                                                ::phy_engine::model::node_t const* node_ref,
+                                                double g) noexcept
+    {
+        if(node_out == nullptr) { return; }
+        if(node_ref == nullptr)
+        {
+            mna.G_ref(node_out->node_index, node_out->node_index) += g;
+            return;
+        }
+        timer555_stamp_conductance(mna, node_out, node_ref, g);
+    }
+
     struct timer555
     {
         inline static constexpr ::fast_io::u8string_view model_name{u8"timer555"};
@@ -132,26 +149,23 @@ namespace phy_engine::model
         double const v_ground{voltage(node_ground)};
         double const v_out{voltage(node_out)};
 
-        // Hold the previous state from the last solved Out voltage, then apply the
-        // threshold/trigger/reset overrides (reset has the highest priority).
+        // Unity TimerChip.BeginStep. An unconnected Reset lead reads ~0 V (see the
+        // 1e8-to-ground note above), so a floating Reset actively forces Out low.
         t.out = v_out > v_vp * 0.5;
         if(v_thr > v_ctrl) { t.out = false; }
         if(v_ctrl * 0.5 > v_trig) { t.out = true; }
         if(v_reset < 0.7 + v_ground) { t.out = false; }
 
-        // Internal divider: V+ --5k-- Ctrl --10k-- Ground.
+        // Unity TimerChip.Stamp: V+ --5k-- Ctrl --10k-- node 0 (the global ground, not pin 7).
         timer555_stamp_conductance(mna, node_vp, node_ctrl, 1.0 / 5000.0);
-        timer555_stamp_conductance(mna, node_ctrl, node_ground, 1.0 / 10000.0);
+        if(node_ctrl != nullptr) { mna.G_ref(node_ctrl->node_index, node_ctrl->node_index) += 1.0 / 10000.0; }
 
-        // Discharge switch: Dis --10 ohm-- ground while the output is low.
+        // Discharge switch: Dis --10 ohm-- node 0 while the output is low.
         if(!t.out && node_dis != nullptr) { mna.G_ref(node_dis->node_index, node_dis->node_index) += 1.0 / 10.0; }
 
-        // Output driver: Out --1 ohm-- V+ (high) or ground (low).
-        if(node_out != nullptr)
-        {
-            if(t.out) { timer555_stamp_conductance(mna, node_out, node_vp, 1.0); }
-            else { mna.G_ref(node_out->node_index, node_out->node_index) += 1.0; }
-        }
+        // Output driver: Out --1 ohm-- V+ (high) or the Ground pin (low).
+        if(t.out) { timer555_stamp_output(mna, node_out, node_vp, 1.0); }
+        else { timer555_stamp_output(mna, node_out, node_ground, 1.0); }
         return true;
     }
 
@@ -166,12 +180,10 @@ namespace phy_engine::model
 
     inline constexpr ::phy_engine::model::node_view generate_internal_node_define(::phy_engine::model::model_reserve_type_t<timer555>, timer555& t) noexcept
     {
-        // Only allocate the internal Ctrl node when the pin is unconnected and at least one
-        // divider rail exists; otherwise it would be a floating unknown in the MNA matrix.
-        if(t.pins[3].nodes == nullptr && (t.pins[0].nodes != nullptr || t.pins[7].nodes != nullptr))
-        {
-            return {__builtin_addressof(t.ctrl_internal), 1};
-        }
+        // Unity always gives Ctrl a real node fed by the internal divider. Allocate the
+        // internal node only when the pin is unconnected; the 10 kohm leg to node 0 keeps it
+        // well-defined, so no floating unknown is introduced.
+        if(t.pins[3].nodes == nullptr) { return {__builtin_addressof(t.ctrl_internal), 1}; }
         return {};
     }
 

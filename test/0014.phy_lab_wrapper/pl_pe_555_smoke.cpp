@@ -18,7 +18,6 @@ int main()
     auto vcc = ex.add_circuit_element("Student Source", position{-2.0, 0.0, 0.0});
     auto trig = ex.add_circuit_element("Student Source", position{-2.0, 0.0, 1.0});
     auto thr = ex.add_circuit_element("Student Source", position{-2.0, 0.0, 2.0});
-    auto rst = ex.add_circuit_element("Student Source", position{-2.0, 0.0, 3.0});
     auto r_out = ex.add_circuit_element("Resistor", position{2.0, 0.0, 0.0});
     auto r_dis = ex.add_circuit_element("Resistor", position{2.0, 0.0, 1.0});
     auto timer = ex.add_circuit_element("555 Timer", position{0.0, 0.0, 0.0});
@@ -27,28 +26,27 @@ int main()
     ex.get_element(vcc).data()["Properties"]["电压"] = 5.0;
     ex.get_element(trig).data()["Properties"]["电压"] = 0.0;
     ex.get_element(thr).data()["Properties"]["电压"] = 0.0;
-    ex.get_element(rst).data()["Properties"]["电压"] = 5.0;
     ex.get_element(r_out).data()["Properties"]["电阻"] = 1e6;
     ex.get_element(r_dis).data()["Properties"]["电阻"] = 1e3;
 
     // 555 pins (Unity TimerChip order):
     // 0=V+, 1=Dis, 2=Thr, 3=Ctrl, 4=Trig, 5=Out, 6=Reset, 7=Ground.
     // Ctrl is intentionally left unconnected to exercise the internal 5k/10k divider.
+    // Reset is wired in a second step so the floating-pin case can be sampled first.
     ex.connect(vcc, 0, timer, 0);
     ex.connect(r_dis, 0, timer, 1);
     ex.connect(thr, 0, timer, 2);
     ex.connect(trig, 0, timer, 4);
     ex.connect(r_out, 0, timer, 5);
-    ex.connect(rst, 0, timer, 6);
     ex.connect(timer, 7, gnd, 0);
     ex.connect(vcc, 1, gnd, 0);
     ex.connect(trig, 1, gnd, 0);
     ex.connect(thr, 1, gnd, 0);
-    ex.connect(rst, 1, gnd, 0);
     ex.connect(r_out, 1, gnd, 0);
     ex.connect(r_dis, 1, timer, 0);
 
     // Locate the PE component index: non-ground elements keep insertion order.
+    // The Reset source is appended later, after the timer, so this index stays valid.
     std::size_t timer_index = ex.elements().size();
     {
         std::size_t pe_index{};
@@ -71,6 +69,25 @@ int main()
         c.analyze();
         return c;
     };
+
+    // d) Reset left floating. Unity's engine (Circuit::Analyze) gives every unconnected lead
+    // its own node and ties it to node 0 through 1e8 ohm, so V[Reset] solves to ~0 V. That
+    // 0 V is below 0.7 + V[Ground], so TimerChip.BeginStep forces Out low even though Trig
+    // is low. This case pins the Unity-faithful behavior: a floating Reset acts as asserted.
+    {
+        auto c = run();
+        double const v_out = sample_pin(c, 5);
+        double const v_dis = sample_pin(c, 1);
+        std::printf("555 floating reset: out=%f dis=%f\n", v_out, v_dis);
+        assert(v_out > -0.1 && v_out < 0.1);
+        assert(v_dis > 0.01 && v_dis < 0.1);
+    }
+
+    // Wire Reset for the remaining cases.
+    auto rst = ex.add_circuit_element("Student Source", position{-2.0, 0.0, 3.0});
+    ex.get_element(rst).data()["Properties"]["电压"] = 5.0;
+    ex.connect(rst, 0, timer, 6);
+    ex.connect(rst, 1, gnd, 0);
 
     // a) Reset high, Trig low (< Ctrl/2 = Vcc/3): Out is driven high through the 1 ohm switch.
     {
