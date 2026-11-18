@@ -299,18 +299,14 @@ inline status_or<code_and_props> to_phy_engine_code_and_props_ec(json const& ele
 
     // ---- Sensors ----
     // The six 3-axis sensors are macros (three DC sources with series output
-    // impedance), so none of them can be expanded 1:1. See `circuit::build_`.
+    // impedance) and the Proximity Sensor is one such output, so none of them can be
+    // expanded 1:1. See `circuit::build_`.
     if (model_id == "Accelerometer" || model_id == "Attitude Sensor" ||
         model_id == "Gravity Sensor" || model_id == "Gyroscope" ||
-        model_id == "Linear Accelerometer" || model_id == "Magnetic Field Sensor")
+        model_id == "Linear Accelerometer" || model_id == "Magnetic Field Sensor" ||
+        model_id == "Proximity Sensor")
     {
         return err(std::errc::invalid_argument, "internal: high-level module should be expanded by adapter: " + model_id);
-    }
-    if (model_id == "Proximity Sensor")
-    {
-        auto v = get_required_float_ec(element_data, "电压");
-        if(!v) { return v.st; }
-        return code_and_props{PHY_ENGINE_E_VDC, { *v.value }};
     }
 
     // ---- Meters & Instruments ----
@@ -1870,6 +1866,52 @@ private:
                     add_wire(endpoint{vdc, 1}, endpoint{gnd, 0});
                     pin_map[pl_id][axis] = endpoint{rs, 1};
                 }
+                continue;
+            }
+
+            // ---- Macro: Proximity Sensor (VDC + series output impedance) ----
+            // Mirrors Unity `ProximitySensor.BuildElements`: a `LogicInputElement` plus a
+            // series resistor driving `Pins[0]`. With no obstacle (PE has no proximity
+            // input) the static output is `低电平`.
+            //
+            // Defaults come from `ProximitySensor.InitializeProperties()`:
+            //   高电平 3 V, 低电平 0 V, 输出阻抗 10000 ohm.
+            if (model_id == "Proximity Sensor")
+            {
+                double low{0.0};
+                detail::get_optional_float(e.data(), "低电平", low);
+
+                double series_r{10000.0};
+                detail::get_optional_float(e.data(), "输出阻抗", series_r);
+                if (!(series_r > 0.0) || !::std::isfinite(series_r)) { series_r = 10000.0; }
+
+                if (auto it_used = pl_pin_used.find(pl_id); it_used != pl_pin_used.end())
+                {
+                    for (auto const& [pin, used] : it_used->second)
+                    {
+                        if (used && (pin < 0 || pin > 0))
+                        {
+                            return detail::err(std::errc::invalid_argument,
+                                               "Proximity Sensor pin out of range: " + std::to_string(pin));
+                        }
+                    }
+                }
+
+                auto gnd_r = add_pe_element(0, {}, "");
+                if(!gnd_r) { return gnd_r.st; }
+                auto const gnd = *gnd_r.value;
+
+                auto vdc_r = add_pe_element(PHY_ENGINE_E_VDC, {low}, "");
+                if(!vdc_r) { return vdc_r.st; }
+                auto const vdc = *vdc_r.value;
+
+                auto rs_r = add_pe_element(PHY_ENGINE_E_RESISTOR, {series_r}, "");
+                if(!rs_r) { return rs_r.st; }
+                auto const rs = *rs_r.value;
+
+                add_wire(endpoint{vdc, 0}, endpoint{rs, 0});
+                add_wire(endpoint{vdc, 1}, endpoint{gnd, 0});
+                pin_map[pl_id][0] = endpoint{rs, 1};
                 continue;
             }
 

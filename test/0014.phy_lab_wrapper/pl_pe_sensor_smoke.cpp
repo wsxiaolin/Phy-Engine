@@ -12,10 +12,12 @@
 // Sensor macros, verified against the Unity sources:
 //   Sensor3Axies.cs : 3x (DC source + series `输出阻抗`) driving Pins[0..2];
 //                     static axis voltage = 偏移 (measured = 0).
+//   ProximitySensor.cs : DC source (`低电平`, no obstacle) + series `输出阻抗`
+//                     driving Pins[0].
 //
 // After expansion a three-axis sensor contributes VDC/R pairs in axis order, so the
 // non-ground component indices are: axis0 VDC=0, axis0 R=1, axis1 VDC=2, axis1 R=3,
-// axis2 VDC=4, axis2 R=5.
+// axis2 VDC=4, axis2 R=5. The Proximity Sensor is VDC=0, R=1.
 static double pin_v(phy_engine::phy_lab_wrapper::pe::sample const& s, std::size_t comp, std::size_t pin)
 {
     return s.pin_voltage[s.pin_voltage_ord[comp] + pin];
@@ -122,6 +124,37 @@ int main()
         double const v_quarter = pin_v(s_quarter, 1, 1);
         ::std::printf("[accel 10k load, Rz=30k] axis0 = %f V (expect 0.375)\n", v_quarter);
         assert(near(v_quarter, 0.375, 0.05));
+    }
+
+    // ---- 4) Proximity Sensor: no obstacle -> 低电平 through 10k ----
+    {
+        auto ex = experiment::create(experiment_type::circuit);
+        ex.entitle("pl_pe_sensor_proximity");
+        auto sensor = ex.add_circuit_element("Proximity Sensor", position{0.0, 0.0, 0.0});
+        auto ld = ex.add_circuit_element("Resistor", position{1.0, 0.0, 0.0});
+        auto gnd = ex.add_circuit_element("Ground Component", position{0.0, 0.0, -1.0});
+
+        ex.get_element(ld).data()["Properties"]["电阻"] = 10000.0;
+        ex.connect(sensor, 0, ld, 0);
+        ex.connect(ld, 1, gnd, 0);
+
+        auto run = [&]() {
+            auto c = pe::circuit::build_from(ex);
+            c.set_analyze_type(PHY_ENGINE_ANALYZE_DC);
+            c.analyze();
+            return c.sample_now();
+        };
+
+        auto s_low = run();  // 低电平 default 0 V
+        double const v_low = pin_v(s_low, 1, 1);
+        ::std::printf("[proximity default] pin0 = %f V (expect 0)\n", v_low);
+        assert(::std::fabs(v_low) < 1e-9);
+
+        ex.get_element(sensor).data()["Properties"]["低电平"] = 2.0;
+        auto s_two = run();  // 2 V through 10k into 10k -> 1 V
+        double const v_two = pin_v(s_two, 1, 1);
+        ::std::printf("[proximity low=2V] pin0 = %f V (expect 1)\n", v_two);
+        assert(near(v_two, 1.0, 0.05));
     }
 
     return 0;

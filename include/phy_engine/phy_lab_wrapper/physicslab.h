@@ -638,6 +638,12 @@ public:
             stats = json{{"电压X", 0.0}, {"电压Y", 0.0}, {"电压Z", 0.0},
                          {"测量值X", 0.0}, {"测量值Y", 0.0}, {"测量值Z", 0.0}};
         }
+        else if (mid == "Proximity Sensor")
+        {
+            // Mirror Unity ProximitySensor.InitializeProperties(): no obstacle -> 低电平.
+            props = json{{"高电平", 3.0}, {"低电平", 0.0}, {"输出阻抗", 10000.0}, {"锁定", 1.0}};
+            stats = json{{"开关", 0.0}};
+        }
         else if (mid == "Logic Output")
         {
             props = json{{"状态", 0.0}, {"高电平", 3.0}, {"低电平", 0.0}, {"锁定", 1.0}};
