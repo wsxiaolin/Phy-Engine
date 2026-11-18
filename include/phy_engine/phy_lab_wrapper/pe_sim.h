@@ -332,8 +332,14 @@ inline status_or<code_and_props> to_phy_engine_code_and_props_ec(json const& ele
     {
         return err(std::errc::invalid_argument, "Photodiode is a high-level module expanded by the adapter; direct 1:1 mapping is not supported");
     }
-    if (model_id == "Basic Diode" || model_id == "Light-Emitting Diode" || 
-        model_id == "Color Light-Emitting Diode" || model_id == "Dual Light-Emitting Diode")
+    // The three LED variants are macros too: each light path is a PN junction plus its own
+    // series resistor (and the Dual/Color parts contain several paths). See `circuit::build_`.
+    if (model_id == "Light-Emitting Diode" || model_id == "Dual Light-Emitting Diode" ||
+        model_id == "Color Light-Emitting Diode")
+    {
+        return err(std::errc::invalid_argument, "internal: high-level module should be expanded by adapter: " + model_id);
+    }
+    if (model_id == "Basic Diode")
     {
         return code_and_props{PHY_ENGINE_E_PN_JUNCTION, {1e-14, 1.0, 1e-14, 1.0, 27.0, 1e-3, 5.0, 0.0, 1.0}};
     }
@@ -1676,6 +1682,125 @@ private:
                 }
                 pin_map[pl_id][0] = endpoint{pn, 0};     // anode
                 pin_map[pl_id][1] = endpoint{rs, 1};     // cathode
+                continue;
+            }
+
+            // ---- Macro: LEDs (PN junction + series resistor) ----
+            // Mirrors the Unity LED demos, which are all built from one `LEDElement` plus one
+            // `ResistorElement` per light path (see `Demos/DualLightDiode.cs` and
+            // `Demos/ColorLightDiode.cs`). Wiring verified against the prefabs:
+            //
+            //   Light-Emitting Diode (`Analog Circuits/Light-Emitting Diode.prefab`):
+            //     same script as Dual, but `LEDRed = null`, so only the green path exists.
+            //     pin0 -> LED(A..K) -> R -> pin1.
+            //   Dual Light-Emitting Diode (`Dual Light-Emitting Diode.prefab`):
+            //     green: pin0 -> LED -> R -> pin1
+            //     red  : pin1 -> LED -> R -> pin0   (anti-parallel; colour follows current)
+            //   Color Light-Emitting Diode (`Color Light-Emitting Diode.prefab`):
+            //     pin0/pin1/pin2 -> LED -> R -> pin3 each (three anodes, common cathode).
+            //
+            // Unity computes the series resistor as `工作电压 / 工作电流` (defaults 3 V / 0.01 A
+            // = 300 ohm) in `SyncProperty()`.
+            //
+            // PN_JUNCTION takes 9 props: Is,N,Isr,Nr,Temp,Ibv,Bv,Bv_set,Area.
+            //   - 击穿电压 maps to Bv; 0 means "no breakdown" (Bv_set=false).
+            //   - 前向压降 (Unity default 2.1024259 V) is an emergent I-V result here, so the
+            //     stock Is/N curve is kept; it cannot be forced through a single prop.
+            //   - 反向耐压 is never read by Unity either, so it is ignored.
+            if (model_id == "Light-Emitting Diode" || model_id == "Dual Light-Emitting Diode" ||
+                model_id == "Color Light-Emitting Diode")
+            {
+                double work_voltage{3.0};
+                detail::get_optional_float(e.data(), "工作电压", work_voltage);
+                double work_current{0.01};
+                detail::get_optional_float(e.data(), "工作电流", work_current);
+
+                double series_r = work_voltage / work_current;
+                if (!(series_r > 0.0) || !::std::isfinite(series_r)) { series_r = 300.0; }
+
+                double breakdown{0.0};
+                detail::get_optional_float(e.data(), "击穿电压", breakdown);
+                bool const bv_set = breakdown > 0.0;
+
+                auto const pn_props = [&]() {
+                    return std::vector<double>{1e-14, 1.0, 1e-14, 1.0, 27.0, 1e-3, breakdown,
+                                               bv_set ? 1.0 : 0.0, 1.0};
+                };
+
+                auto const max_pin = (model_id == "Color Light-Emitting Diode") ? 3 : 1;
+                if (auto it_used = pl_pin_used.find(pl_id); it_used != pl_pin_used.end())
+                {
+                    for (auto const& [pin, used] : it_used->second)
+                    {
+                        if (used && (pin < 0 || pin > max_pin))
+                        {
+                            return detail::err(std::errc::invalid_argument,
+                                               "LED pin out of range: " + std::to_string(pin));
+                        }
+                    }
+                }
+
+                auto add_led_path = [&]() -> status_or<std::pair<std::size_t, std::size_t>> {
+                    auto pn_r = add_pe_element(PHY_ENGINE_E_PN_JUNCTION, pn_props(), "");
+                    if(!pn_r) { return pn_r.st; }
+                    auto rs_r = add_pe_element(PHY_ENGINE_E_RESISTOR, {series_r}, "");
+                    if(!rs_r) { return rs_r.st; }
+                    std::size_t const pn = *pn_r.value;
+                    std::size_t const rs = *rs_r.value;
+                    // LED cathode -> series resistor -> shared cathode node.
+                    add_wire(endpoint{pn, 1}, endpoint{rs, 0});
+                    return std::pair<std::size_t, std::size_t>{pn, rs};
+                };
+
+                if (model_id == "Light-Emitting Diode")
+                {
+                    auto path_r = add_led_path();
+                    if(!path_r) { return path_r.st; }
+                    auto [pn, rs] = *path_r.value;
+                    pin_map[pl_id][0] = endpoint{pn, 0};  // anode
+                    pin_map[pl_id][1] = endpoint{rs, 1};  // cathode
+                    continue;
+                }
+
+                if (model_id == "Dual Light-Emitting Diode")
+                {
+                    // Green: pin0 -> LED -> R -> pin1.
+                    auto green_r = add_led_path();
+                    if(!green_r) { return green_r.st; }
+                    auto [png, rg] = *green_r.value;
+                    // Red: pin1 -> LED -> R -> pin0 (anti-parallel).
+                    auto red_r = add_led_path();
+                    if(!red_r) { return red_r.st; }
+                    auto [pnr, rr] = *red_r.value;
+
+                    // Both light paths share the two external pins.
+                    add_wire(endpoint{png, 0}, endpoint{rr, 1});
+                    add_wire(endpoint{pnr, 0}, endpoint{rg, 1});
+
+                    pin_map[pl_id][0] = endpoint{png, 0};  // green anode / red cathode side
+                    pin_map[pl_id][1] = endpoint{pnr, 0};  // red anode / green cathode side
+                    continue;
+                }
+
+                // Color LED: three anodes (pin0/pin1/pin2) sharing cathode pin3.
+                auto red_r = add_led_path();
+                if(!red_r) { return red_r.st; }
+                auto [pn_red, r_red] = *red_r.value;
+                auto green_r = add_led_path();
+                if(!green_r) { return green_r.st; }
+                auto [pn_green, r_green] = *green_r.value;
+                auto blue_r = add_led_path();
+                if(!blue_r) { return blue_r.st; }
+                auto [pn_blue, r_blue] = *blue_r.value;
+
+                // Join the three series-resistor ends into the common cathode pin.
+                add_wire(endpoint{r_red, 1}, endpoint{r_green, 1});
+                add_wire(endpoint{r_red, 1}, endpoint{r_blue, 1});
+
+                pin_map[pl_id][0] = endpoint{pn_red, 0};    // red anode
+                pin_map[pl_id][1] = endpoint{pn_green, 0};  // green anode
+                pin_map[pl_id][2] = endpoint{pn_blue, 0};   // blue anode
+                pin_map[pl_id][3] = endpoint{r_red, 1};     // common cathode
                 continue;
             }
 

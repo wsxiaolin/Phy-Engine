@@ -8,9 +8,6 @@ HEAD 已回到 `eaeb072` 的映射策略：Web ModelID 只别名到**工厂已�
 
 - 已完成：§0（`cbc8842`、`aeb5ef3`，另含 GCC12 libstdc++ constexpr 兼容修复）；§1.1 Comparator（`83b52f9`）；§1.2 Schmitt（`9ab06b9`）；§1.3 8bit（`6f4f1c7`）；§2.1 SPDT（`85e122c`）；§2.2 DPDT（`62f7b09`）；§3.1 Joystick（`46ec03a`）；§3.2 Slide Rheostat（`d3a9422`）。
 - 遗留发现：comparator/schmitt 输出脚接模拟负载会触发混合节点重复驱动导致的奇异矩阵，冒烟均走纯数字路径采样；引擎侧去重属后续引擎修复，不在元件映射范围。
-- §3.3 Dual LED：保持 PN_JUNCTION 1:1，等 Unity 语义确认。
-- §4 555：公开渠道查不到 PL 引脚顺序（catalog `pins: []`、chips.json 无 555、glb 是 LFS 桩），维持封锁；需真机 `.sav` 或 Unity 源码后按「比较器×2 + SR 锁存 + 放电开关」模拟核实现。
-- §5 电表/传感器/灯：维持别名，单开后续批次。
 
 ## 进度（2026-11-16）
 
@@ -19,6 +16,10 @@ HEAD 已回到 `eaeb072` 的映射策略：Web ModelID 只别名到**工厂已�
 - §5.B 光敏电阻/白炽灯：`b4c3362` 初次兜底（缺 `电阻` 即报错 → 缺省 10k / 10，非正阻值钳制 1e-3）；键名依据已由 Unity 源码核实，不再是「待确认」。`IncandescentLamp.cs` 只写 `额定电压`（3）/`额定功率`（0.85），`SyncProperties()` 算 `NominalResistance = U^2/P ≈ 10.588 Ω`；`PhotoResistor.cs` 只写 `亮电阻`（10000）/`暗电阻`（1e6）/`响应时间`（0.03）/`最大电压`（150）/`响应系数`（0.6），实时值走 `GetTarget()` 的分段对数 R(lux) 曲线，显示用 `Statistics["电阻"]`。修正：两元件优先读显式 `电阻`（兼容旧 fixture），否则白炽灯用 `U^2/P`（默认 3/0.85）、光敏电阻用 `亮电阻`（默认 10000，PE 无光照输入，静态取有光的典型工作点），再钳制 > 0。`physicslab.h` 默认 props 同步为 Unity 键集。
 - §5.C Photodiode 展开：**暂缓**。全仓库（include/documents/test/custom/python）搜不到任何光电流属性键证据（`光照`/`照度`/`光强`/`光电流` 均零命中），`PLAN.md:143` 也写明「先对 Unity 属性键」。已试做过「PN_JUNCTION + IDC」宏展开，因缺少真机数据无法验证 IDC 极性/拓扑，冒烟测试正偏 0.7 V、反偏 0 V 均不符合物理预期，已回退，未提交。前置：真机 `.sav` 或 Unity prefab 确认键名与量纲。
 - 构建环境：本机 GCC 12 开 OpenMP 编译 `pe_synth.h` 会报 `expected '=' before '{'`（`_Pragma` + `__VA_ARGS__` 展开），属工具链兼容问题，验证时用 `-DPHY_ENGINE_ENABLE_OPENMP=OFF`。仓库当前无 CI workflow（`08d693f` 已移除）。
+
+## 进度（2026-11-18）
+
+- §3.3 LED 三种全部展开（`feat/led-unity`）。Unity 源码核对结论：`DualLightDiode.cs` 绿色路 `Pins[0]`(阳极) → LED → `ResistorElement(PositivePin=null, NegativePin=Pins[1])`，红色路 `Pins[1]` → LED → R → `Pins[0]`，即**反向并联**；`ColorLightDiode.cs` 三路 `Pins[0]/[1]/[2]` 阳极各自串阻后共接 `Pins[3]` 公共阴极；单色 `Light-Emitting Diode.prefab` 挂同一脚本但 `LEDRed: {fileID: 0}`，只剩绿色一路。三者串阻统一为 `工作电压 / 工作电流`（默认 3/0.01 = 300 Ω）。PE 侧一律 `PN_JUNCTION` + `PHY_ENGINE_E_RESISTOR` 展开，`to_phy_engine_code_and_props_ec` 对三者改成 adapter-only 拦截。冒烟 `pl_pe_led_smoke`：单色 5 V/300 Ω → 14.3 mA、结压 0.706 V，0.7 V 时 0.31 mA；双色正接/反接各亮一路且反向路电流为 0；彩色三阳极互不串扰。
 
 ## 进度（2026-11-17）
 
@@ -129,22 +130,15 @@ catalog 4 pin。展开成两个串联电阻，抽头比先读属性 `"滑块"` /
 
 commit：`feat: expand Slide Rheostat into two series resistors`
 
-### 3.3 Dual Light-Emitting Diode
+### 3.3 LED（单色 / 双色 / 彩色）
 
-catalog 只有 2 pin，先保持 `PN_JUNCTION` 1:1。若 Unity 语义是反向并联，再在 `build_()` 展开成两个极性相反的 `PN_JUNCTION`。确认语义后再动。
+已完成。Unity 语义确认为「每路一个 LEDElement + 一个 ResistorElement」：双色反向并联，彩色三阳极共阴极，单色只保留绿色一路。`build_()` 按此展开，串阻取 `工作电压/工作电流`（默认 300 Ω）。`击穿电压` 映射到 PN_JUNCTION 的 `Bv`；`前向压降` 是 I-V 结果，保持内置曲线。
 
-commit（仅当确认反向并联）：`feat: expand Dual LED as anti-parallel diodes`
+commit：`feat: expand the three LED variants as PN junction plus series resistor`
 
-## 4. 555 Timer
+## 4. 555 Timer（已完成）
 
-引擎没有 555 模型。两种做法，选工作量小的：
-
-- A. `build_()` 用已有比较器 + 放电开关 + 电阻网络搭标准 555（引脚多，单独开一个 commit 序列）
-- B. `PHY_ENGINE_E_VERILOG_NETLIST` 塞一份 555 Verilog，只走 `create_circuit_ex`
-
-先核 catalog/Unity 的 pin 名（当前 catalog `pins: []`，布局在 ChipComponent）。没核对前不要写模型。
-
-commit 拆开：`feat: 555 pin map` → `feat: 555 analog core` → `feat: 555 smoke astable`
+已按 Unity `TimerChip` 反编译实现为独立模型 `timer555`（工厂码 26），引脚序 `V+, Dis, Thr, Ctrl, Trig, Out, Reset, Ground`。详见「进度（2026-11-17）」。
 
 ## 5. 电表 / 传感器 / 灯：先别升级模型
 
