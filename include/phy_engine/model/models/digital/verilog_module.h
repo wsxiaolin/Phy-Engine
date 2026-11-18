@@ -209,13 +209,15 @@ namespace phy_engine::model
 
     static_assert(::phy_engine::model::defines::can_generate_pin_view<VERILOG_MODULE>);
 
-    inline constexpr ::phy_engine::digital::need_operate_analog_node_t update_digital_clk_define(::phy_engine::model::model_reserve_type_t<VERILOG_MODULE>,
+    // GCC 12 libstdc++ has no constexpr shared_ptr operations; this runtime dispatch
+    // path never needs compile-time evaluation, so constexpr is intentionally omitted.
+    inline ::phy_engine::digital::need_operate_analog_node_t update_digital_clk_define(::phy_engine::model::model_reserve_type_t<VERILOG_MODULE>,
                                                                                                  VERILOG_MODULE& m,
                                                                                                  ::phy_engine::digital::digital_node_update_table& table,
                                                                                                  double /*tr_duration*/,
                                                                                                  ::phy_engine::model::digital_update_method_t method) noexcept
     {
-        if(m.design == nullptr || m.top_instance.mod == nullptr) [[unlikely]] { return {}; }
+        if(m.design.get() == nullptr || m.top_instance.mod == nullptr) [[unlikely]] { return {}; }
         auto const& cm{*m.top_instance.mod};
 
         auto read_dn = [&](::phy_engine::model::node_t* n) noexcept -> ::phy_engine::verilog::digital::logic_t

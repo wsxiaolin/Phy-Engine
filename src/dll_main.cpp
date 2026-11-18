@@ -1,5 +1,14 @@
 ﻿#include <phy_engine/phy_engine.h>
 
+// Emscripten and other wasm builds compile with -fno-exceptions, where try/catch is
+// ill-formed. Guard the handful of exception-based cleanup paths so the same source
+// builds for both native and wasm targets.
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS) || defined(_CPPUNWIND)
+#define PHY_ENGINE_HAS_EXCEPTIONS 1
+#else
+#define PHY_ENGINE_HAS_EXCEPTIONS 0
+#endif
+
 #include <atomic>
 #include <algorithm>
 #include <cstddef>
@@ -20,8 +29,11 @@
 #include <phy_engine/model/models/linear/coupled_inductors.h>
 #include <phy_engine/model/models/linear/op_amp.h>
 
+#include <phy_engine/model/models/controller/spdt_switch.h>
+#include <phy_engine/model/models/controller/dpdt_switch.h>
 #include <phy_engine/model/models/controller/relay.h>
 #include <phy_engine/model/models/controller/comparator.h>
+#include <phy_engine/model/models/controller/timer555.h>
 
 #include <phy_engine/model/models/generator/sawtooth.h>
 #include <phy_engine/model/models/generator/square.h>
@@ -270,7 +282,9 @@ inline void set_phy_engine_error(::std::string msg)
 
 [[nodiscard]] inline bool read_text_file(::std::filesystem::path const& path, ::fast_io::u8string& out_text) noexcept
 {
+#if PHY_ENGINE_HAS_EXCEPTIONS
     try
+#endif
     {
         ::std::ifstream ifs(path, ::std::ios::binary);
         if(!ifs.is_open()) { return false; }
@@ -284,10 +298,12 @@ inline void set_phy_engine_error(::std::string msg)
         out_text.assign(::fast_io::u8string_view{reinterpret_cast<char8_t const*>(buf.data()), buf.size()});
         return true;
     }
+#if PHY_ENGINE_HAS_EXCEPTIONS
     catch(...)
     {
         return false;
     }
+#endif
 }
 
 struct verilog_include_context
@@ -404,7 +420,9 @@ extern "C" void* verilog_runtime_create(char const* src,
         set_phy_engine_error("verilog_runtime_create: src is null");
         return nullptr;
     }
+#if PHY_ENGINE_HAS_EXCEPTIONS
     try
+#endif
     {
         auto* rt = new (::std::nothrow) verilog_runtime_handle{};
         if(rt == nullptr)
@@ -493,6 +511,7 @@ extern "C" void* verilog_runtime_create(char const* src,
 
         return rt;
     }
+#if PHY_ENGINE_HAS_EXCEPTIONS
     catch(::std::exception const& e)
     {
         set_phy_engine_error(::std::string("verilog_runtime_create: exception: ") + e.what());
@@ -503,6 +522,7 @@ extern "C" void* verilog_runtime_create(char const* src,
         set_phy_engine_error("verilog_runtime_create: unknown exception");
         return nullptr;
     }
+#endif
 }
 
 extern "C" void verilog_runtime_destroy(void* runtime_ptr)
@@ -764,7 +784,9 @@ extern "C" int verilog_runtime_set_signal_value(void* runtime_ptr, ::std::size_t
 extern "C" void* pl_experiment_create(int type_value)
 {
     ::phy_engine::phy_lab_wrapper::detail::clear_last_error();
+#if PHY_ENGINE_HAS_EXCEPTIONS
     try
+#endif
     {
         auto* ex = new (::std::nothrow)
             ::phy_engine::phy_lab_wrapper::experiment(::phy_engine::phy_lab_wrapper::experiment::create(
@@ -776,6 +798,7 @@ extern "C" void* pl_experiment_create(int type_value)
         }
         return ex;
     }
+#if PHY_ENGINE_HAS_EXCEPTIONS
     catch(::std::exception const& e)
     {
         set_phy_engine_error(::std::string("pl_experiment_create: exception: ") + e.what());
@@ -786,6 +809,7 @@ extern "C" void* pl_experiment_create(int type_value)
         set_phy_engine_error("pl_experiment_create: unknown exception");
         return nullptr;
     }
+#endif
 }
 
 extern "C" void* pl_experiment_load_from_string(char const* sav_json, ::std::size_t sav_json_size)
@@ -1870,6 +1894,26 @@ void build_netlist_from_wires(phy_engine::netlist::netlist& nl,
             g.freq = *((*curr_prop_ptr)++);
             g.phase = *((*curr_prop_ptr)++);
             return add_model(nl, ::std::move(g));
+        }
+        case 24:
+        {
+            // SPDT switch: 0/1
+            double const v = *((*curr_prop_ptr)++);
+            return add_model(nl, ::phy_engine::model::spdt_switch{.cut_through = (v != 0.0)});
+        }
+        case 25:
+        {
+            // DPDT switch: 0/1
+            double const v = *((*curr_prop_ptr)++);
+            return add_model(nl, ::phy_engine::model::dpdt_switch{.cut_through = (v != 0.0)});
+        }
+        case 26:
+        {
+            // 555 timer: Hl, Ll
+            ::phy_engine::model::timer555 t{};
+            t.Hl = *((*curr_prop_ptr)++);
+            t.Ll = *((*curr_prop_ptr)++);
+            return add_model(nl, ::std::move(t));
         }
         case 50:
         {

@@ -125,8 +125,8 @@ endmodule
         .allow_multi_driver = false,
         .assume_binary_inputs = true,
         .opt_level = opt_level,
-        .omax_max_iter = 2,       // keep the test fast
         .omax_timeout_ms = 0,     // deterministic for CI
+        .omax_max_iter = 2,       // keep the test fast
         .omax_randomize = false,  // Omax should not be worse than O3 by default
         .omax_verify = (opt_level >= 4),
         .omax_verify_exact_max_inputs = 12,  // 6 inputs => exhaustive check (fast)
@@ -226,7 +226,9 @@ int main()
     auto const o3 = run_once(3);
     if(!o3) { return 1; }
 
-    auto const omax = run_once(4);
+    // Omax is opt level 5 in the engine (`is_omax = raw_lvl >= 5`); level 4 is the O4
+    // fixpoint and never fills the Omax report traces this test checks.
+    auto const omax = run_once(5);
     if(!omax) { return 2; }
 
     if(omax->gate_count > o3->gate_count)

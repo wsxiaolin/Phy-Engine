@@ -103,8 +103,8 @@ std::optional<run_result> run_once(::fast_io::u8string_view src, std::uint8_t op
     ::phy_engine::verilog::digital::pe_synth_options opt{
         .allow_inout = false,
         .allow_multi_driver = false,
-        .opt_level = opt_level,
         .assume_binary_inputs = true,
+        .opt_level = opt_level,
     };
 
     if(!::phy_engine::verilog::digital::synthesize_to_pe_netlist(nl, top_inst, ports, &err, opt))

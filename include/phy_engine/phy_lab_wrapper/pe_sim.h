@@ -145,6 +145,26 @@ inline status_or<int> get_required_int01_ec(json const& element_data, std::strin
     return (*v.value != 0.0) ? 1 : 0;
 }
 
+// Optional numeric read: returns false when the key is absent, true + value when present.
+inline bool get_optional_float(json const& element_data, std::string_view key, double& out) noexcept
+{
+    auto it = element_data.find("Properties");
+    if (it == element_data.end() || !it->is_object()) { return false; }
+    auto it_props = it->find(std::string(key));
+    if (it_props == it->end()) { return false; }
+    auto r = to_double_ec(*it_props);
+    if(!r) { return false; }
+    out = *r.value;
+    return true;
+}
+
+// Unity exposes "理想模式" == 1 to switch an instrument to its ideal topology.
+inline bool is_ideal(json const& element_data) noexcept
+{
+    double v{};
+    return get_optional_float(element_data, "理想模式", v) && v == 1.0;
+}
+
 struct code_and_props
 {
     int code{};
@@ -260,37 +280,67 @@ inline status_or<code_and_props> to_phy_engine_code_and_props_ec(json const& ele
     if (model_id == "JK Flipflop") return code_and_props{PHY_ENGINE_E_DIGITAL_JKFF, {}};
 
     // Higher-level modules are expanded by the adapter (see `circuit::build_`).
-    if (model_id == "Counter" || model_id == "Random Generator" || model_id == "8bit Input" || model_id == "8bit Display")
+    if (model_id == "Counter" || model_id == "Random Generator" || model_id == "Analog Joystick" ||
+        model_id == "Slide Rheostat")
     {
         return err(std::errc::invalid_argument, "internal: high-level module should be expanded by adapter: " + model_id);
     }
 
-    // ---- Sensors (modeled as variable voltage sources or resistors) ----
-    if (model_id == "Accelerometer" || model_id == "Attitude Sensor" || 
-        model_id == "Gravity Sensor" || model_id == "Gyroscope" || 
-        model_id == "Linear Accelerometer" || model_id == "Magnetic Field Sensor" || 
+    // PL pins are MSB-first (pin 0 = bit7 ... pin 7 = bit0), matching PE EIGHT_BIT_INPUT/DISPLAY pin order.
+    if (model_id == "8bit Input")
+    {
+        // PL stores the byte value under "十进制" (see physicslab.h default props for "8bit Input").
+        auto v = get_required_float_ec(element_data, "十进制");
+        double val = v ? *v.value : 0.0;
+        if(val < 0.0) val = 0.0; if(val > 255.0) val = 255.0;
+        return code_and_props{PHY_ENGINE_E_DIGITAL_EIGHT_BIT_INPUT, { val }};
+    }
+    if (model_id == "8bit Display") return code_and_props{PHY_ENGINE_E_DIGITAL_EIGHT_BIT_DISPLAY, {}};
+
+    // ---- Sensors ----
+    // The six 3-axis sensors are macros (three DC sources with series output
+    // impedance) and the Proximity Sensor is one such output, so none of them can be
+    // expanded 1:1. See `circuit::build_`.
+    if (model_id == "Accelerometer" || model_id == "Attitude Sensor" ||
+        model_id == "Gravity Sensor" || model_id == "Gyroscope" ||
+        model_id == "Linear Accelerometer" || model_id == "Magnetic Field Sensor" ||
         model_id == "Proximity Sensor")
     {
-        auto v = get_required_float_ec(element_data, "电压");
-        if(!v) { return v.st; }
-        return code_and_props{PHY_ENGINE_E_VDC, { *v.value }};
+        return err(std::errc::invalid_argument, "internal: high-level module should be expanded by adapter: " + model_id);
     }
 
-    // ---- Meters & Instruments (modeled as resistors with measurement) ----
-    if (model_id == "Simple Ammeter" || model_id == "Simple Voltmeter" || 
-        model_id == "Microammeter" || model_id == "Galvanometer" || 
-        model_id == "Multimeter" || model_id == "Electricity Meter" || 
-        model_id == "Simple Instrument")
+    // ---- Meters & Instruments ----
+    // The 3-pin meters (Simple Ammeter / Simple Voltmeter / Galvanometer / Microammeter),
+    // the 2-pin Multimeter and the 4-pin Electricity Meter are reconstructed from the
+    // Unity Physics Lab topologies. They become several RESISTOR (and, for the Multimeter,
+    // VDC) elements inside `circuit::build_`, so a 1:1 alias would silently drop pins.
+    if (model_id == "Simple Voltmeter" || model_id == "Simple Ammeter" || model_id == "Microammeter" ||
+        model_id == "Galvanometer" || model_id == "Multimeter" || model_id == "Electricity Meter")
+    {
+        return err(std::errc::invalid_argument, "internal: high-level module should be expanded by adapter: " + model_id);
+    }
+    // "Simple Instrument" has no Unity counterpart topology; keep the legacy high-impedance alias.
+    if (model_id == "Simple Instrument")
     {
         auto r = get_required_float_ec(element_data, "电阻");
-        if(!r) { return r.st; }
-        return code_and_props{PHY_ENGINE_E_RESISTOR, { *r.value }};
+        double const r_val = r ? *r.value : 1e6;
+        return code_and_props{PHY_ENGINE_E_RESISTOR, { r_val }};
     }
 
     // ---- Diodes & LEDs ----
-    if (model_id == "Basic Diode" || model_id == "Light-Emitting Diode" || 
-        model_id == "Color Light-Emitting Diode" || model_id == "Dual Light-Emitting Diode" || 
-        model_id == "Photodiode")
+    // Photodiode is a multi-element macro (see `circuit::build_`), so it must not reach here.
+    if (model_id == "Photodiode")
+    {
+        return err(std::errc::invalid_argument, "Photodiode is a high-level module expanded by the adapter; direct 1:1 mapping is not supported");
+    }
+    // The three LED variants are macros too: each light path is a PN junction plus its own
+    // series resistor (and the Dual/Color parts contain several paths). See `circuit::build_`.
+    if (model_id == "Light-Emitting Diode" || model_id == "Dual Light-Emitting Diode" ||
+        model_id == "Color Light-Emitting Diode")
+    {
+        return err(std::errc::invalid_argument, "internal: high-level module should be expanded by adapter: " + model_id);
+    }
+    if (model_id == "Basic Diode")
     {
         return code_and_props{PHY_ENGINE_E_PN_JUNCTION, {1e-14, 1.0, 1e-14, 1.0, 27.0, 1e-3, 5.0, 0.0, 1.0}};
     }
@@ -391,13 +441,56 @@ inline status_or<code_and_props> to_phy_engine_code_and_props_ec(json const& ele
     }
 
     // ---- Variable Resistors & Passive Components ----
-    if (model_id == "Photoresistor" || model_id == "Slide Rheostat" || 
-        model_id == "Resistance Box" || model_id == "Resistance Law" || 
-        model_id == "Incandescent Lamp" || model_id == "Fuse Component")
+    // Slide Rheostat is expanded by the adapter (see `circuit::build_`).
+    // Unity's Photoresistor/IncandescentLamp do not expose a "电阻" property, so a
+    // missing key used to abort the whole build. Each branch below follows Unity's
+    // property set to derive a resistance, then clamps to a positive minimum
+    // (resistance.h uses G = 1/R).
+    if (model_id == "Photoresistor")
+    {
+        // Unity exposes "亮电阻" (bright resistance, default 10000) and "暗电阻"
+        // (dark resistance, default 1000000); the live value is a piecewise-log
+        // R(lux) curve in PhotoResistor.GetTarget() driven by the ambient light
+        // sensor. PE has no light input yet, so approximate statically with the
+        // bright resistance (the lit operating point). Prefer an explicit "电阻"
+        // for backwards compatibility with older fixtures.
+        auto r = get_required_float_ec(element_data, "电阻");
+        double r_val = 0.0;
+        if(r) { r_val = *r.value; }
+        else
+        {
+            auto bright = get_required_float_ec(element_data, "亮电阻");
+            r_val = bright ? *bright.value : 10e3;
+        }
+        if(!(r_val > 0.0)) { r_val = 1e-3; }
+        return code_and_props{PHY_ENGINE_E_RESISTOR, { r_val }};
+    }
+    if (model_id == "Incandescent Lamp")
+    {
+        // Unity stores "额定电压" (default 3 V) and "额定功率" (default 0.85 W) and
+        // derives NominalResistance = U^2 / P in SyncProperties(). Prefer an explicit
+        // "电阻" for backwards compatibility, otherwise compute U^2/P and fall back
+        // to the default 3^2 / 0.85 ~= 10.588 ohm.
+        auto r = get_required_float_ec(element_data, "电阻");
+        double r_val = 0.0;
+        if(r) { r_val = *r.value; }
+        else
+        {
+            auto u = get_required_float_ec(element_data, "额定电压");
+            auto p = get_required_float_ec(element_data, "额定功率");
+            double const u_val = u ? *u.value : 3.0;
+            double const p_val = p ? *p.value : 0.85;
+            r_val = (p_val > 0.0) ? (u_val * u_val / p_val) : 10.588;
+        }
+        if(!(r_val > 0.0)) { r_val = 1e-3; }
+        return code_and_props{PHY_ENGINE_E_RESISTOR, { r_val }};
+    }
+    if (model_id == "Resistance Box" || model_id == "Resistance Law" || model_id == "Fuse Component")
     {
         auto r = get_required_float_ec(element_data, "电阻");
-        if(!r) { return r.st; }
-        return code_and_props{PHY_ENGINE_E_RESISTOR, { *r.value }};
+        double r_val = r ? *r.value : 1000.0;
+        if(!(r_val > 0.0)) { r_val = 1e-3; }
+        return code_and_props{PHY_ENGINE_E_RESISTOR, { r_val }};
     }
 
     // ---- Inductive Loads ----
@@ -430,11 +523,16 @@ inline status_or<code_and_props> to_phy_engine_code_and_props_ec(json const& ele
     // ---- Semiconductors ----
     if (model_id == "Transistor")
     {
-        auto is_val = get_required_float_ec(element_data, "Is").value_or(1e-14);
-        auto n_val = get_required_float_ec(element_data, "N").value_or(1.0);
-        auto beta_val = get_required_float_ec(element_data, "BetaF").value_or(100.0);
-        auto temp_val = get_required_float_ec(element_data, "Temp").value_or(27.0);
-        auto area_val = get_required_float_ec(element_data, "Area").value_or(1.0);
+        auto is_r = get_required_float_ec(element_data, "Is");
+        double is_val = is_r ? *is_r.value : 1e-14;
+        auto n_r = get_required_float_ec(element_data, "N");
+        double n_val = n_r ? *n_r.value : 1.0;
+        auto beta_r = get_required_float_ec(element_data, "BetaF");
+        double beta_val = beta_r ? *beta_r.value : 100.0;
+        auto temp_r = get_required_float_ec(element_data, "Temp");
+        double temp_val = temp_r ? *temp_r.value : 27.0;
+        auto area_r = get_required_float_ec(element_data, "Area");
+        double area_val = area_r ? *area_r.value : 1.0;
         return code_and_props{PHY_ENGINE_E_BJT_NPN, { is_val, n_val, beta_val, temp_val, area_val }};
     }
     if (model_id == "N-MOSFET")
@@ -465,6 +563,34 @@ inline status_or<code_and_props> to_phy_engine_code_and_props_ec(json const& ele
         if(!mu) { return mu.st; }
         return code_and_props{PHY_ENGINE_E_OP_AMP, { *mu.value }};
     }
+    if (model_id == "Comparator")
+    {
+        // PL uses "低电平"/"高电平" (see pe_to_pl.h write-back and physicslab.h defaults);
+        // "Ll"/"Hl" are kept as a fallback for legacy fixtures.
+        auto ll = get_required_float_ec(element_data, "低电平");
+        if(!ll) { ll = get_required_float_ec(element_data, "Ll"); }
+        double ll_val = ll ? *ll.value : 0.0;
+        auto hl = get_required_float_ec(element_data, "高电平");
+        if(!hl) { hl = get_required_float_ec(element_data, "Hl"); }
+        double hl_val = hl ? *hl.value : 5.0;
+        return code_and_props{PHY_ENGINE_E_COMPARATOR, { ll_val, hl_val }};
+    }
+    if (model_id == "Schmitt Trigger")
+    {
+        auto vth_low = get_required_float_ec(element_data, "Vth_low");
+        double vth_low_val = vth_low ? *vth_low.value : 1.0;
+        auto vth_high = get_required_float_ec(element_data, "Vth_high");
+        double vth_high_val = vth_high ? *vth_high.value : 2.0;
+        auto inverted = get_required_float_ec(element_data, "inverted");
+        double inverted_val = inverted ? *inverted.value : 0.0;
+        auto ll = get_required_float_ec(element_data, "低电平");
+        if(!ll) { ll = get_required_float_ec(element_data, "Ll"); }
+        double ll_val = ll ? *ll.value : 0.0;
+        auto hl = get_required_float_ec(element_data, "高电平");
+        if(!hl) { hl = get_required_float_ec(element_data, "Hl"); }
+        double hl_val = hl ? *hl.value : 5.0;
+        return code_and_props{PHY_ENGINE_E_DIGITAL_SCHMITT_TRIGGER, { vth_low_val, vth_high_val, inverted_val, ll_val, hl_val }};
+    }
     if (model_id == "Relay Component")
     {
         auto von = get_required_float_ec(element_data, "导通电压");
@@ -475,7 +601,12 @@ inline status_or<code_and_props> to_phy_engine_code_and_props_ec(json const& ele
     }
     if (model_id == "555 Timer")
     {
-        return err(std::errc::invalid_argument, "555 Timer requires macro expansion or Verilog module; direct 1:1 mapping not supported");
+        // PL exposes "高电平"/"低电平" (defaults 3/0) plus a non-simulated "锁定" flag.
+        auto hl = get_required_float_ec(element_data, "高电平");
+        double const hl_val = hl ? *hl.value : 3.0;
+        auto ll = get_required_float_ec(element_data, "低电平");
+        double const ll_val = ll ? *ll.value : 0.0;
+        return code_and_props{PHY_ENGINE_E_TIMER555, { hl_val, ll_val }};
     }
 
     return err(std::errc::invalid_argument, "Phy-Engine backend does not support element ModelID=" + model_id);
@@ -530,6 +661,7 @@ inline status_or<std::size_t> expected_prop_arity_ec(int element_code) noexcept
         case PHY_ENGINE_E_CCVS: return 1;
         case PHY_ENGINE_E_SWITCH_SPDT: return 1;
         case PHY_ENGINE_E_SWITCH_DPDT: return 1;
+        case PHY_ENGINE_E_TIMER555: return 2;
         case PHY_ENGINE_E_TRANSFORMER_CENTER_TAP: return 1;
         case PHY_ENGINE_E_OP_AMP: return 1;
         case PHY_ENGINE_E_RELAY: return 2;
@@ -546,7 +678,7 @@ inline status_or<std::size_t> expected_prop_arity_ec(int element_code) noexcept
         case PHY_ENGINE_E_BSIM3V32_PMOS: return 13;
         case PHY_ENGINE_E_DIGITAL_EIGHT_BIT_INPUT: return 1;
         case PHY_ENGINE_E_DIGITAL_EIGHT_BIT_DISPLAY: return 0;
-        case PHY_ENGINE_E_DIGITAL_SCHMITT_TRIGGER: return 4;
+        case PHY_ENGINE_E_DIGITAL_SCHMITT_TRIGGER: return 5;
         
         default: return err(std::errc::invalid_argument, "unknown property arity for PE element code: " + std::to_string(element_code));
     }
@@ -1085,7 +1217,280 @@ private:
                 continue;
             }
 
+            // ---- Macro: Analog Joystick (two independent voltage-divider potentiometers) ----
+            // Catalog pin order 0..5: X1,X2,X3,Y1,Y2,Y3. Each axis is a resistor pair with
+            // the middle pin as the wiper: X1 --[R/2]-- X2 --[R/2]-- X3 (same for Y).
+            // "电阻" is the total per-axis resistance (default 10e3 when missing).
+            if (model_id == "Analog Joystick")
+            {
+                auto r_axis = detail::get_required_float_ec(e.data(), "电阻");
+                double const r_total = r_axis ? *r_axis.value : 10e3;
+                double const r_half = r_total / 2.0;
+
+                auto rx_top_r = add_pe_element(PHY_ENGINE_E_RESISTOR, {r_half}, "");
+                if(!rx_top_r) { return rx_top_r.st; }
+                auto rx_top = *rx_top_r.value;
+                auto rx_bot_r = add_pe_element(PHY_ENGINE_E_RESISTOR, {r_half}, "");
+                if(!rx_bot_r) { return rx_bot_r.st; }
+                auto rx_bot = *rx_bot_r.value;
+                auto ry_top_r = add_pe_element(PHY_ENGINE_E_RESISTOR, {r_half}, "");
+                if(!ry_top_r) { return ry_top_r.st; }
+                auto ry_top = *ry_top_r.value;
+                auto ry_bot_r = add_pe_element(PHY_ENGINE_E_RESISTOR, {r_half}, "");
+                if(!ry_bot_r) { return ry_bot_r.st; }
+                auto ry_bot = *ry_bot_r.value;
+
+                // Tie the wiper-side pins of each divider into one node.
+                add_wire(endpoint{rx_top, 1}, endpoint{rx_bot, 0});
+                add_wire(endpoint{ry_top, 1}, endpoint{ry_bot, 0});
+
+                pin_map[pl_id][0] = endpoint{rx_top, 0};  // X1 (axis end)
+                pin_map[pl_id][1] = endpoint{rx_top, 1};  // X2 (wiper)
+                pin_map[pl_id][2] = endpoint{rx_bot, 1};  // X3 (axis end)
+                pin_map[pl_id][3] = endpoint{ry_top, 0};  // Y1 (axis end)
+                pin_map[pl_id][4] = endpoint{ry_top, 1};  // Y2 (wiper)
+                pin_map[pl_id][5] = endpoint{ry_bot, 1};  // Y3 (axis end)
+                continue;
+            }
+
+            // ---- Macro: Slide Rheostat (resistor pair with a movable tap) ----
+            // Catalog pins 0..3 are unnamed ("Pin 1".."Pin 4" at identical positions), so the
+            // adapter fixes a convention: 0=end A, 1/2=wiper taps, 3=end B. The two tap pins
+            // share the wiper node. Slider fraction "滑块" (fallback "比例", default 0.5,
+            // clamped to [0,1]) is the resistance share below the wiper, i.e. a potentiometer
+            // output ratio: R(A->wiper) = R*(1-f), R(wiper->B) = R*f.
+            // "电阻" is the total end-to-end resistance (default 10e3 when missing).
+            if (model_id == "Slide Rheostat")
+            {
+                auto r_req = detail::get_required_float_ec(e.data(), "电阻");
+                double const r_total = r_req ? *r_req.value : 10e3;
+                auto frac_req = detail::get_required_float_ec(e.data(), "滑块");
+                if(!frac_req) { frac_req = detail::get_required_float_ec(e.data(), "比例"); }
+                double frac = frac_req ? *frac_req.value : 0.5;
+                // Clamp to an open interval: frac==0 or 1 would make one branch 0 ohm,
+                // and resistance.h computes G = 1/R, so 0 ohm becomes +inf and poisons the matrix.
+                if(frac < 1e-6) frac = 1e-6; if(frac > 1.0 - 1e-6) frac = 1.0 - 1e-6;
+
+                auto r_top_r = add_pe_element(PHY_ENGINE_E_RESISTOR, {r_total * (1.0 - frac)}, "");
+                if(!r_top_r) { return r_top_r.st; }
+                auto r_top = *r_top_r.value;
+                auto r_bot_r = add_pe_element(PHY_ENGINE_E_RESISTOR, {r_total * frac}, "");
+                if(!r_bot_r) { return r_bot_r.st; }
+                auto r_bot = *r_bot_r.value;
+
+                // Tie the wiper-side pins into one node.
+                add_wire(endpoint{r_top, 1}, endpoint{r_bot, 0});
+
+                pin_map[pl_id][0] = endpoint{r_top, 0};  // end A
+                pin_map[pl_id][1] = endpoint{r_top, 1};  // tap 1 (wiper)
+                pin_map[pl_id][2] = endpoint{r_top, 1};  // tap 2 (wiper)
+                pin_map[pl_id][3] = endpoint{r_bot, 1};  // end B
+                continue;
+            }
+
+            // ---- Macro: 3-pin moving-coil ammeters (Simple Ammeter / Galvanometer / Microammeter) ----
+            // Unity Physics Lab topology:
+            //   SimpleAmmeter: pin0 = common (-), pin1 = 0.6 A tap (+), pin2 = 3 A tap (+).
+            //     Realistic mode is the closed delta R1(pin1->pin0)=1/72, R2(pin1->pin2)=0.1,
+            //     R3(pin2->pin0)=0.025; ideal mode is a single 1e-6 movement on pin1->pin0 with
+            //     pin2 shorted to pin1 (ResistorElement negatives/positives joined).
+            //   Galvanometer / Microammeter: R1(pin1->pin0) = movement, R2(pin2->pin1) = series
+            //     resistor, shares one node at pin1.
+            //
+            // All values are Unity's *realistic* ones (resistance.h does G = 1/R, so never 0).
+            // Unity exposes ideal mode via Properties["理想模式"] == 1; honour it when present.
+            if (model_id == "Simple Ammeter" || model_id == "Galvanometer" || model_id == "Microammeter")
+            {
+                bool const ideal = detail::is_ideal(e.data());
+
+                if (model_id == "Simple Ammeter")
+                {
+                    // Realistic: delta of 1/72, 0.1, 0.025 ohm. Ideal: single 1e-6 movement with
+                    // pin2 tied to pin1 (same effective 1e-6 between the two live terminals).
+                    double r_movement = 1.0 / 72.0;
+                    double r_shunt_a = 0.1;
+                    double r_shunt_b = 0.025;
+                    if (ideal)
+                    {
+                        r_movement = 1e-6;
+                        r_shunt_a = 1e-6;
+                        r_shunt_b = 1e-6;
+                    }
+                    auto r1_r = add_pe_element(PHY_ENGINE_E_RESISTOR, {r_movement}, "");
+                    if(!r1_r) { return r1_r.st; }
+                    auto r1 = *r1_r.value;
+                    auto r2_r = add_pe_element(PHY_ENGINE_E_RESISTOR, {r_shunt_a}, "");
+                    if(!r2_r) { return r2_r.st; }
+                    auto r2 = *r2_r.value;
+                    auto r3_r = add_pe_element(PHY_ENGINE_E_RESISTOR, {r_shunt_b}, "");
+                    if(!r3_r) { return r3_r.st; }
+                    auto r3 = *r3_r.value;
+
+                    // Unity: R1(+)=pin1, R1(-)=pin0; R2(+)=pin1, R2(-)=pin2; R3(+)=pin2, R3(-)=pin0.
+                    // Union the shared terminals into PE nodes with explicit wires.
+                    add_wire(endpoint{r1, 0}, endpoint{r2, 0});  // node pin1
+                    add_wire(endpoint{r1, 1}, endpoint{r3, 1});  // node pin0
+                    add_wire(endpoint{r2, 1}, endpoint{r3, 0});  // node pin2
+
+                    pin_map[pl_id][0] = endpoint{r1, 1};  // pin0 common -
+                    pin_map[pl_id][1] = endpoint{r1, 0};  // pin1 0.6 A +
+                    pin_map[pl_id][2] = endpoint{r2, 1};  // pin2 3 A +
+                    continue;
+                }
+
+                // Galvanometer: 100 / 2400. Microammeter: 500 / 2000.
+                double r_movement = (model_id == "Galvanometer") ? 100.0 : 500.0;
+                double r_series = (model_id == "Galvanometer") ? 2400.0 : 2000.0;
+                if (ideal) { r_movement = 1e-6; r_series = 1e-6; }
+
+                auto r1_r = add_pe_element(PHY_ENGINE_E_RESISTOR, {r_movement}, "");
+                if(!r1_r) { return r1_r.st; }
+                auto r1 = *r1_r.value;
+                auto r2_r = add_pe_element(PHY_ENGINE_E_RESISTOR, {r_series}, "");
+                if(!r2_r) { return r2_r.st; }
+                auto r2 = *r2_r.value;
+
+                // Unity: R1(pin1, pin0), R2(pin2, pin1), R1(+)-R2(-) joined -> node pin1.
+                add_wire(endpoint{r1, 0}, endpoint{r2, 1});
+                pin_map[pl_id][0] = endpoint{r1, 1};  // pin0 common -
+                pin_map[pl_id][1] = endpoint{r1, 0};  // pin1 +
+                pin_map[pl_id][2] = endpoint{r2, 0};  // pin2 range + 
+                continue;
+            }
+
+            // ---- Macro: Simple Voltmeter (3000 ohm movement + 12000 ohm 15 V range tap) ----
+            // Unity SimpleVoltmeter: pin0 = common (-), pin1 = 3 V tap (+), pin2 = 15 V tap (+).
+            // Realistic mode: 3000 ohm between pin1 and pin0, 12000 ohm between pin2 and pin1.
+            // Ideal mode: 1e6 ohm movement on pin1-pin0, pin2 tied to pin1.
+            if (model_id == "Simple Voltmeter")
+            {
+                bool const ideal = detail::is_ideal(e.data());
+                double const r_movement = ideal ? 1e6 : 3000.0;
+                double const r_range = ideal ? 1e-6 : 12000.0;
+
+                auto r1_r = add_pe_element(PHY_ENGINE_E_RESISTOR, {r_movement}, "");
+                if(!r1_r) { return r1_r.st; }
+                auto r1 = *r1_r.value;
+                auto r2_r = add_pe_element(PHY_ENGINE_E_RESISTOR, {r_range}, "");
+                if(!r2_r) { return r2_r.st; }
+                auto r2 = *r2_r.value;
+
+                // Unity: Resistor1(pin1 -> pin0), Resistor2(pin2 -> pin1), joined at pin1.
+                add_wire(endpoint{r2, 1}, endpoint{r1, 0});
+                pin_map[pl_id][0] = endpoint{r1, 1};  // pin0 common -
+                pin_map[pl_id][1] = endpoint{r1, 0};  // pin1 3 V +
+                pin_map[pl_id][2] = endpoint{r2, 0};  // pin2 15 V +
+                continue;
+            }
+
+            // ---- Macro: Multimeter (single resistor selected by the 状态 dial) ----
+            // Unity Multimeter has 18 dial positions; the internal resistance is one of
+            // 1e9 (voltage/off ranges), 1e-9 (current ranges) or 1 (resistance ranges).
+            // 1e-9 ohm would drive resistance.h's G = 1/R to 1e9 and wreck the matrix, so
+            // clamp the current ranges to 1e-6 ohm (still effectively a short).
+            if (model_id == "Multimeter")
+            {
+                double state{};
+                if (!detail::get_optional_float(e.data(), "状态", state)) { state = 0.0; }
+                int const dial = (state >= 0.0 && state <= 17.0) ? static_cast<int>(state) : 0;
+
+                double r{};
+                if (dial == 0 || (dial >= 1 && dial <= 2) || (dial >= 13 && dial <= 17))
+                {
+                    r = 1e9;      // off / DC-AC voltage ranges
+                }
+                else if (dial >= 3 && dial <= 7)
+                {
+                    r = 1e-6;     // DC current ranges (Unity uses 1e-9)
+                }
+                else
+                {
+                    r = 1.0;      // resistance ranges
+                }
+
+                auto r_r = add_pe_element(PHY_ENGINE_E_RESISTOR, {r}, pl_id);
+                if(!r_r) { return r_r.st; }
+                auto idx = *r_r.value;
+                pin_map[pl_id][0] = endpoint{idx, 0};
+                pin_map[pl_id][1] = endpoint{idx, 1};
+                continue;
+            }
+
+            // ---- Macro: Electricity Meter (voltage coil + current coil) ----
+            // Unity ElectricityMeter: 4 pins, voltage coil 1e9 ohm across pin0-pin1 and
+            // current coil 0.01 ohm through pin2-pin3.
+            if (model_id == "Electricity Meter")
+            {
+                auto vc_r = add_pe_element(PHY_ENGINE_E_RESISTOR, {1e9}, "");
+                if(!vc_r) { return vc_r.st; }
+                auto vc = *vc_r.value;
+                auto ic_r = add_pe_element(PHY_ENGINE_E_RESISTOR, {0.01}, "");
+                if(!ic_r) { return ic_r.st; }
+                auto ic = *ic_r.value;
+
+                pin_map[pl_id][0] = endpoint{vc, 0};  // pin0 voltage coil +
+                pin_map[pl_id][1] = endpoint{vc, 1};  // pin1 voltage coil -
+                pin_map[pl_id][2] = endpoint{ic, 0};  // pin2 current coil +
+                pin_map[pl_id][3] = endpoint{ic, 1};  // pin3 current coil -
+                continue;
+            }
+
             
+
+            // ---- Explicit pin maps for multi-pin switches ----
+            // The 1:1 default maps PL pin N to PE pin N, which only works while the PL
+            // catalog order matches the model's pins[]. Record the convention explicitly
+            // so a catalog reorder fails loudly here instead of silently miswiring.
+            // SPDT: 0=COM, 1=NO, 2=NC (matches spdt_switch::pins).
+            // DPDT: 0=COM1, 1=NO1, 2=NC1, 3=COM2, 4=NO2, 5=NC2 (matches dpdt_switch::pins).
+            if (model_id == "SPDT Switch" || model_id == "DPDT Switch")
+            {
+                auto cp = detail::to_phy_engine_code_and_props_ec(e.data());
+                if(!cp) { return cp.st; }
+                auto idx_r = add_pe_element(cp.value->code, std::move(cp.value->props), pl_id);
+                if(!idx_r) { return idx_r.st; }
+                auto idx = *idx_r.value;
+                auto& pm = pin_map[pl_id];
+                int const pin_count = (model_id == "SPDT Switch") ? 3 : 6;
+                if (auto it_used = pl_pin_used.find(pl_id); it_used != pl_pin_used.end())
+                {
+                    for (auto const& [pin, used] : it_used->second)
+                    {
+                        if (used)
+                        {
+                            if (pin >= pin_count) { return detail::err(std::errc::invalid_argument, std::string(model_id) + " pin out of range: " + std::to_string(pin)); }
+                            pm[pin] = endpoint{idx, pin};
+                        }
+                    }
+                }
+                continue;
+            }
+
+            // ---- Explicit pin map for the 555 timer ----
+            // PL catalog order matches timer555::pins 1:1:
+            //   0=V+, 1=Dis, 2=Thr, 3=Ctrl, 4=Trig, 5=Out, 6=Reset, 7=Ground.
+            // Unconnected pins are fine (the model supplies an internal Ctrl node); out-of-range fails loudly.
+            if (model_id == "555 Timer")
+            {
+                auto cp = detail::to_phy_engine_code_and_props_ec(e.data());
+                if(!cp) { return cp.st; }
+                auto idx_r = add_pe_element(cp.value->code, std::move(cp.value->props), pl_id);
+                if(!idx_r) { return idx_r.st; }
+                auto idx = *idx_r.value;
+                auto& pm = pin_map[pl_id];
+                if (auto it_used = pl_pin_used.find(pl_id); it_used != pl_pin_used.end())
+                {
+                    for (auto const& [pin, used] : it_used->second)
+                    {
+                        if (used)
+                        {
+                            if (pin >= 8) { return detail::err(std::errc::invalid_argument, "555 Timer pin out of range: " + std::to_string(pin)); }
+                            pm[pin] = endpoint{idx, pin};
+                        }
+                    }
+                }
+                continue;
+            }
 
             // ---- PL macro: D Flipflop (DFF + optional ~Q inverter) ----
             // physicsLab pin order:
@@ -1194,7 +1599,323 @@ private:
                 pin_map[pl_id][1] = endpoint{fs, 4};  // Bout -> bout
                 continue;
             }
-// 1:1 element mapping
+            // ---- Macro: Photodiode (PN junction + series 100 ohm + parallel 1e8 ohm + photocurrent) ----
+            // Mirrors Unity `PhotoDiode.BuildElements`:
+            //   pin0 (anode) = diode anode
+            //   diode cathode --[Rs = 100 ohm]-- pin1 (cathode)
+            //   Rs  = 1e8 ohm in parallel across the two pins (reverse leakage / bias path)
+            //   Isrc = IDC from pin0, so photocurrent leaves pin0 and returns through pin1.
+            //
+            // PL pin convention (fixed by the adapter): 0=anode, 1=cathode.
+            //
+            // PN_JUNCTION takes 9 props: Is,N,Isr,Nr,Temp,Ibv,Bv,Bv_set,Area.
+            // Unity exposes 前向压降/击穿电压, which have no 1:1 counterpart here:
+            //   - 前向压降 (forward drop) is an emergent I-V property, so the stock Is/N curve is kept.
+            //   - 击穿电压 maps to Bv; 0 means "no breakdown" in Unity, i.e. Bv_set=false.
+            // Temp/Ibv/Area keep the same defaults the 1:1 diode mapping uses.
+            //
+            // Photocurrent: Unity computes `亮度 * 响应系数 * 1e-4`. `亮度` is an internal,
+            // time-smoothed value fed from the "light" environment sensor and is never stored
+            // in the .sav, so the adapter cannot reproduce the smoothing. Instead we read an
+            // optional `环境亮度` key (lux) from Properties, else fall back to 0 (dark).
+            if (model_id == "Photodiode")
+            {
+                auto drop_r = detail::get_required_float_ec(e.data(), "前向压降");
+                double const forward_drop = drop_r ? *drop_r.value : 0.6;
+                (void)forward_drop;  // emergent from the PN curve; kept for documentation only.
+
+                auto bv_r = detail::get_required_float_ec(e.data(), "击穿电压");
+                double const breakdown = bv_r ? *bv_r.value : 0.0;
+                bool const bv_set = breakdown > 0.0;
+
+                // 额定电流 is only used by Unity for over-current breakage, which the adapter does not model.
+
+                auto coeff_r = detail::get_required_float_ec(e.data(), "响应系数");
+                double const resp_coeff = coeff_r ? *coeff_r.value : 0.1;
+
+                // Adapter convention: read ambient light (lux) from the optional `环境亮度` property.
+                // Unity's `响应时间` smoothing is not reproduced (no time-stepped sensor loop here).
+                auto lux_r = detail::get_required_float_ec(e.data(), "环境亮度");
+                double const lux = lux_r ? *lux_r.value : 0.0;
+                double const photocurrent = lux * resp_coeff * 1e-4;
+
+                auto pn_r = add_pe_element(PHY_ENGINE_E_PN_JUNCTION,
+                                           {1e-14, 1.0, 1e-14, 1.0, 27.0, 1e-3, breakdown, bv_set ? 1.0 : 0.0, 1.0},
+                                           "");
+                if(!pn_r) { return pn_r.st; }
+                auto pn = *pn_r.value;
+
+                auto rs_r = add_pe_element(PHY_ENGINE_E_RESISTOR, {100.0}, "");
+                if(!rs_r) { return rs_r.st; }
+                auto rs = *rs_r.value;
+
+                auto rp_r = add_pe_element(PHY_ENGINE_E_RESISTOR, {1e8}, "");
+                if(!rp_r) { return rp_r.st; }
+                auto rp = *rp_r.value;
+
+                auto isrc_r = add_pe_element(PHY_ENGINE_E_IDC, {photocurrent}, "");
+                if(!isrc_r) { return isrc_r.st; }
+                auto isrc = *isrc_r.value;
+
+                // Internal node: diode cathode == Rs.0 == Rp.1 == IDC "+".
+                // A reverse-biased photodiode drives conventional current from cathode to
+                // anode inside the device, so the source's "+" sits on the cathode side.
+                endpoint const mid_node{pn, 1};
+                add_wire(mid_node, endpoint{rs, 0});
+                add_wire(mid_node, endpoint{rp, 1});
+                add_wire(mid_node, endpoint{isrc, 0});
+
+                // Anode node: diode anode == Rp.0 == IDC "-".
+                endpoint const anode_node{pn, 0};
+                add_wire(anode_node, endpoint{rp, 0});
+                add_wire(anode_node, endpoint{isrc, 1});
+
+                // Pin mapping: pin0=anode, pin1=cathode; validate against the PL pin usage.
+                if (auto it_used = pl_pin_used.find(pl_id); it_used != pl_pin_used.end())
+                {
+                    for (auto const& [pin, used] : it_used->second)
+                    {
+                        if (used && (pin < 0 || pin > 1))
+                        {
+                            return detail::err(std::errc::invalid_argument, "Photodiode pin out of range: " + std::to_string(pin));
+                        }
+                    }
+                }
+                pin_map[pl_id][0] = endpoint{pn, 0};     // anode
+                pin_map[pl_id][1] = endpoint{rs, 1};     // cathode
+                continue;
+            }
+
+            // ---- Macro: LEDs (PN junction + series resistor) ----
+            // Mirrors the Unity LED demos, which are all built from one `LEDElement` plus one
+            // `ResistorElement` per light path (see `Demos/DualLightDiode.cs` and
+            // `Demos/ColorLightDiode.cs`). Wiring verified against the prefabs:
+            //
+            //   Light-Emitting Diode (`Analog Circuits/Light-Emitting Diode.prefab`):
+            //     same script as Dual, but `LEDRed = null`, so only the green path exists.
+            //     pin0 -> LED(A..K) -> R -> pin1.
+            //   Dual Light-Emitting Diode (`Dual Light-Emitting Diode.prefab`):
+            //     green: pin0 -> LED -> R -> pin1
+            //     red  : pin1 -> LED -> R -> pin0   (anti-parallel; colour follows current)
+            //   Color Light-Emitting Diode (`Color Light-Emitting Diode.prefab`):
+            //     pin0/pin1/pin2 -> LED -> R -> pin3 each (three anodes, common cathode).
+            //
+            // Unity computes the series resistor as `工作电压 / 工作电流` (defaults 3 V / 0.01 A
+            // = 300 ohm) in `SyncProperty()`.
+            //
+            // PN_JUNCTION takes 9 props: Is,N,Isr,Nr,Temp,Ibv,Bv,Bv_set,Area.
+            //   - 击穿电压 maps to Bv; 0 means "no breakdown" (Bv_set=false).
+            //   - 前向压降 (Unity default 2.1024259 V) is an emergent I-V result here, so the
+            //     stock Is/N curve is kept; it cannot be forced through a single prop.
+            //   - 反向耐压 is never read by Unity either, so it is ignored.
+            if (model_id == "Light-Emitting Diode" || model_id == "Dual Light-Emitting Diode" ||
+                model_id == "Color Light-Emitting Diode")
+            {
+                double work_voltage{3.0};
+                detail::get_optional_float(e.data(), "工作电压", work_voltage);
+                double work_current{0.01};
+                detail::get_optional_float(e.data(), "工作电流", work_current);
+
+                double series_r = work_voltage / work_current;
+                if (!(series_r > 0.0) || !::std::isfinite(series_r)) { series_r = 300.0; }
+
+                double breakdown{0.0};
+                detail::get_optional_float(e.data(), "击穿电压", breakdown);
+                bool const bv_set = breakdown > 0.0;
+
+                auto const pn_props = [&]() {
+                    return std::vector<double>{1e-14, 1.0, 1e-14, 1.0, 27.0, 1e-3, breakdown,
+                                               bv_set ? 1.0 : 0.0, 1.0};
+                };
+
+                auto const max_pin = (model_id == "Color Light-Emitting Diode") ? 3 : 1;
+                if (auto it_used = pl_pin_used.find(pl_id); it_used != pl_pin_used.end())
+                {
+                    for (auto const& [pin, used] : it_used->second)
+                    {
+                        if (used && (pin < 0 || pin > max_pin))
+                        {
+                            return detail::err(std::errc::invalid_argument,
+                                               "LED pin out of range: " + std::to_string(pin));
+                        }
+                    }
+                }
+
+                auto add_led_path = [&]() -> status_or<std::pair<std::size_t, std::size_t>> {
+                    auto pn_r = add_pe_element(PHY_ENGINE_E_PN_JUNCTION, pn_props(), "");
+                    if(!pn_r) { return pn_r.st; }
+                    auto rs_r = add_pe_element(PHY_ENGINE_E_RESISTOR, {series_r}, "");
+                    if(!rs_r) { return rs_r.st; }
+                    std::size_t const pn = *pn_r.value;
+                    std::size_t const rs = *rs_r.value;
+                    // LED cathode -> series resistor -> shared cathode node.
+                    add_wire(endpoint{pn, 1}, endpoint{rs, 0});
+                    return std::pair<std::size_t, std::size_t>{pn, rs};
+                };
+
+                if (model_id == "Light-Emitting Diode")
+                {
+                    auto path_r = add_led_path();
+                    if(!path_r) { return path_r.st; }
+                    auto [pn, rs] = *path_r.value;
+                    pin_map[pl_id][0] = endpoint{pn, 0};  // anode
+                    pin_map[pl_id][1] = endpoint{rs, 1};  // cathode
+                    continue;
+                }
+
+                if (model_id == "Dual Light-Emitting Diode")
+                {
+                    // Green: pin0 -> LED -> R -> pin1.
+                    auto green_r = add_led_path();
+                    if(!green_r) { return green_r.st; }
+                    auto [png, rg] = *green_r.value;
+                    // Red: pin1 -> LED -> R -> pin0 (anti-parallel).
+                    auto red_r = add_led_path();
+                    if(!red_r) { return red_r.st; }
+                    auto [pnr, rr] = *red_r.value;
+
+                    // Both light paths share the two external pins.
+                    add_wire(endpoint{png, 0}, endpoint{rr, 1});
+                    add_wire(endpoint{pnr, 0}, endpoint{rg, 1});
+
+                    pin_map[pl_id][0] = endpoint{png, 0};  // green anode / red cathode side
+                    pin_map[pl_id][1] = endpoint{pnr, 0};  // red anode / green cathode side
+                    continue;
+                }
+
+                // Color LED: three anodes (pin0/pin1/pin2) sharing cathode pin3.
+                auto red_r = add_led_path();
+                if(!red_r) { return red_r.st; }
+                auto [pn_red, r_red] = *red_r.value;
+                auto green_r = add_led_path();
+                if(!green_r) { return green_r.st; }
+                auto [pn_green, r_green] = *green_r.value;
+                auto blue_r = add_led_path();
+                if(!blue_r) { return blue_r.st; }
+                auto [pn_blue, r_blue] = *blue_r.value;
+
+                // Join the three series-resistor ends into the common cathode pin.
+                add_wire(endpoint{r_red, 1}, endpoint{r_green, 1});
+                add_wire(endpoint{r_red, 1}, endpoint{r_blue, 1});
+
+                pin_map[pl_id][0] = endpoint{pn_red, 0};    // red anode
+                pin_map[pl_id][1] = endpoint{pn_green, 0};  // green anode
+                pin_map[pl_id][2] = endpoint{pn_blue, 0};   // blue anode
+                pin_map[pl_id][3] = endpoint{r_red, 1};     // common cathode
+                continue;
+            }
+
+            // ---- Macro: 6 three-axis sensors (3x VDC + series output impedance) ----
+            // Mirrors Unity `Sensor3Axies.BuildElements`: for each axis a DC voltage source
+            // in series with a resistor that ends on `Pins[axis]`. The source's negative
+            // terminal is the device's internal ground.
+            //
+            // Static operating point: `SyncStatistics()` computes
+            //   axis voltage = clamp(measured, +/-量程) * 响应系数 + 偏移
+            // and PE has no motion input, so measured = 0 and the axis voltage is `偏移`.
+            //
+            // Defaults come from `Assets/Resources/Experiments/Sensors/*.prefab`
+            // (OffsetDefault / SensitivityDefault / ResistanceDefault):
+            //   Accelerometer        0.75 V / 0.229 / 10000 ohm (RangeDefault 2)
+            //   Gravity Sensor       0.75 V / 0.229 / 10000 ohm (RangeDefault 2)
+            //   Linear Accelerometer 0.75 V / 0.229 / 10000 ohm (RangeDefault 2)
+            //   Attitude Sensor      2.5  V / 0.0125 / 10000 ohm (RangeDefault 180)
+            //   Gyroscope            2.5  V / 0.0125 / 10000 ohm (RangeDefault 150)
+            //   Magnetic Field       3.2  V / 80    / 10000 ohm (RangeDefault 0.04)
+            if (model_id == "Accelerometer" || model_id == "Attitude Sensor" ||
+                model_id == "Gravity Sensor" || model_id == "Gyroscope" ||
+                model_id == "Linear Accelerometer" || model_id == "Magnetic Field Sensor")
+            {
+                double offset{0.75};
+                if (model_id == "Attitude Sensor" || model_id == "Gyroscope") { offset = 2.5; }
+                else if (model_id == "Magnetic Field Sensor") { offset = 3.2; }
+                detail::get_optional_float(e.data(), "偏移", offset);
+
+                double series_r{10000.0};
+                detail::get_optional_float(e.data(), "输出阻抗", series_r);
+                if (!(series_r > 0.0) || !::std::isfinite(series_r)) { series_r = 10000.0; }
+
+                if (auto it_used = pl_pin_used.find(pl_id); it_used != pl_pin_used.end())
+                {
+                    for (auto const& [pin, used] : it_used->second)
+                    {
+                        if (used && (pin < 0 || pin > 2))
+                        {
+                            return detail::err(std::errc::invalid_argument,
+                                               std::string(model_id) + " pin out of range: " + std::to_string(pin));
+                        }
+                    }
+                }
+
+                auto gnd_r = add_pe_element(0, {}, "");
+                if(!gnd_r) { return gnd_r.st; }
+                auto const gnd = *gnd_r.value;
+
+                for (int axis = 0; axis < 3; ++axis)
+                {
+                    auto vdc_r = add_pe_element(PHY_ENGINE_E_VDC, {offset}, "");
+                    if(!vdc_r) { return vdc_r.st; }
+                    auto const vdc = *vdc_r.value;
+
+                    auto rs_r = add_pe_element(PHY_ENGINE_E_RESISTOR, {series_r}, "");
+                    if(!rs_r) { return rs_r.st; }
+                    auto const rs = *rs_r.value;
+
+                    // VDC "+" -> series R -> Pins[axis]; VDC "-" -> internal ground.
+                    add_wire(endpoint{vdc, 0}, endpoint{rs, 0});
+                    add_wire(endpoint{vdc, 1}, endpoint{gnd, 0});
+                    pin_map[pl_id][axis] = endpoint{rs, 1};
+                }
+                continue;
+            }
+
+            // ---- Macro: Proximity Sensor (VDC + series output impedance) ----
+            // Mirrors Unity `ProximitySensor.BuildElements`: a `LogicInputElement` plus a
+            // series resistor driving `Pins[0]`. With no obstacle (PE has no proximity
+            // input) the static output is `低电平`.
+            //
+            // Defaults come from `ProximitySensor.InitializeProperties()`:
+            //   高电平 3 V, 低电平 0 V, 输出阻抗 10000 ohm.
+            if (model_id == "Proximity Sensor")
+            {
+                double low{0.0};
+                detail::get_optional_float(e.data(), "低电平", low);
+
+                double series_r{10000.0};
+                detail::get_optional_float(e.data(), "输出阻抗", series_r);
+                if (!(series_r > 0.0) || !::std::isfinite(series_r)) { series_r = 10000.0; }
+
+                if (auto it_used = pl_pin_used.find(pl_id); it_used != pl_pin_used.end())
+                {
+                    for (auto const& [pin, used] : it_used->second)
+                    {
+                        if (used && (pin < 0 || pin > 0))
+                        {
+                            return detail::err(std::errc::invalid_argument,
+                                               "Proximity Sensor pin out of range: " + std::to_string(pin));
+                        }
+                    }
+                }
+
+                auto gnd_r = add_pe_element(0, {}, "");
+                if(!gnd_r) { return gnd_r.st; }
+                auto const gnd = *gnd_r.value;
+
+                auto vdc_r = add_pe_element(PHY_ENGINE_E_VDC, {low}, "");
+                if(!vdc_r) { return vdc_r.st; }
+                auto const vdc = *vdc_r.value;
+
+                auto rs_r = add_pe_element(PHY_ENGINE_E_RESISTOR, {series_r}, "");
+                if(!rs_r) { return rs_r.st; }
+                auto const rs = *rs_r.value;
+
+                add_wire(endpoint{vdc, 0}, endpoint{rs, 0});
+                add_wire(endpoint{vdc, 1}, endpoint{gnd, 0});
+                pin_map[pl_id][0] = endpoint{rs, 1};
+                continue;
+            }
+
+            // 1:1 element mapping
             auto cp = detail::to_phy_engine_code_and_props_ec(e.data());
             if(!cp) { return cp.st; }
             auto idx_r = add_pe_element(cp.value->code, std::move(cp.value->props), pl_id);
