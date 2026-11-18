@@ -297,11 +297,16 @@ inline status_or<code_and_props> to_phy_engine_code_and_props_ec(json const& ele
     }
     if (model_id == "8bit Display") return code_and_props{PHY_ENGINE_E_DIGITAL_EIGHT_BIT_DISPLAY, {}};
 
-    // ---- Sensors (modeled as variable voltage sources or resistors) ----
-    if (model_id == "Accelerometer" || model_id == "Attitude Sensor" || 
-        model_id == "Gravity Sensor" || model_id == "Gyroscope" || 
-        model_id == "Linear Accelerometer" || model_id == "Magnetic Field Sensor" || 
-        model_id == "Proximity Sensor")
+    // ---- Sensors ----
+    // The six 3-axis sensors are macros (three DC sources with series output
+    // impedance), so none of them can be expanded 1:1. See `circuit::build_`.
+    if (model_id == "Accelerometer" || model_id == "Attitude Sensor" ||
+        model_id == "Gravity Sensor" || model_id == "Gyroscope" ||
+        model_id == "Linear Accelerometer" || model_id == "Magnetic Field Sensor")
+    {
+        return err(std::errc::invalid_argument, "internal: high-level module should be expanded by adapter: " + model_id);
+    }
+    if (model_id == "Proximity Sensor")
     {
         auto v = get_required_float_ec(element_data, "电压");
         if(!v) { return v.st; }
@@ -1804,7 +1809,71 @@ private:
                 continue;
             }
 
-// 1:1 element mapping
+            // ---- Macro: 6 three-axis sensors (3x VDC + series output impedance) ----
+            // Mirrors Unity `Sensor3Axies.BuildElements`: for each axis a DC voltage source
+            // in series with a resistor that ends on `Pins[axis]`. The source's negative
+            // terminal is the device's internal ground.
+            //
+            // Static operating point: `SyncStatistics()` computes
+            //   axis voltage = clamp(measured, +/-量程) * 响应系数 + 偏移
+            // and PE has no motion input, so measured = 0 and the axis voltage is `偏移`.
+            //
+            // Defaults come from `Assets/Resources/Experiments/Sensors/*.prefab`
+            // (OffsetDefault / SensitivityDefault / ResistanceDefault):
+            //   Accelerometer        0.75 V / 0.229 / 10000 ohm (RangeDefault 2)
+            //   Gravity Sensor       0.75 V / 0.229 / 10000 ohm (RangeDefault 2)
+            //   Linear Accelerometer 0.75 V / 0.229 / 10000 ohm (RangeDefault 2)
+            //   Attitude Sensor      2.5  V / 0.0125 / 10000 ohm (RangeDefault 180)
+            //   Gyroscope            2.5  V / 0.0125 / 10000 ohm (RangeDefault 150)
+            //   Magnetic Field       3.2  V / 80    / 10000 ohm (RangeDefault 0.04)
+            if (model_id == "Accelerometer" || model_id == "Attitude Sensor" ||
+                model_id == "Gravity Sensor" || model_id == "Gyroscope" ||
+                model_id == "Linear Accelerometer" || model_id == "Magnetic Field Sensor")
+            {
+                double offset{0.75};
+                if (model_id == "Attitude Sensor" || model_id == "Gyroscope") { offset = 2.5; }
+                else if (model_id == "Magnetic Field Sensor") { offset = 3.2; }
+                detail::get_optional_float(e.data(), "偏移", offset);
+
+                double series_r{10000.0};
+                detail::get_optional_float(e.data(), "输出阻抗", series_r);
+                if (!(series_r > 0.0) || !::std::isfinite(series_r)) { series_r = 10000.0; }
+
+                if (auto it_used = pl_pin_used.find(pl_id); it_used != pl_pin_used.end())
+                {
+                    for (auto const& [pin, used] : it_used->second)
+                    {
+                        if (used && (pin < 0 || pin > 2))
+                        {
+                            return detail::err(std::errc::invalid_argument,
+                                               std::string(model_id) + " pin out of range: " + std::to_string(pin));
+                        }
+                    }
+                }
+
+                auto gnd_r = add_pe_element(0, {}, "");
+                if(!gnd_r) { return gnd_r.st; }
+                auto const gnd = *gnd_r.value;
+
+                for (int axis = 0; axis < 3; ++axis)
+                {
+                    auto vdc_r = add_pe_element(PHY_ENGINE_E_VDC, {offset}, "");
+                    if(!vdc_r) { return vdc_r.st; }
+                    auto const vdc = *vdc_r.value;
+
+                    auto rs_r = add_pe_element(PHY_ENGINE_E_RESISTOR, {series_r}, "");
+                    if(!rs_r) { return rs_r.st; }
+                    auto const rs = *rs_r.value;
+
+                    // VDC "+" -> series R -> Pins[axis]; VDC "-" -> internal ground.
+                    add_wire(endpoint{vdc, 0}, endpoint{rs, 0});
+                    add_wire(endpoint{vdc, 1}, endpoint{gnd, 0});
+                    pin_map[pl_id][axis] = endpoint{rs, 1};
+                }
+                continue;
+            }
+
+            // 1:1 element mapping
             auto cp = detail::to_phy_engine_code_and_props_ec(e.data());
             if(!cp) { return cp.st; }
             auto idx_r = add_pe_element(cp.value->code, std::move(cp.value->props), pl_id);

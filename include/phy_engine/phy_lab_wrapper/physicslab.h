@@ -612,6 +612,32 @@ public:
             props = json{{"额定电压", 3.0}, {"额定功率", 0.85}, {"锁定", 1.0}};
             stats = json{{"电流", 0.0}, {"电压", 0.0}, {"功率", 0.0}};
         }
+        else if (mid == "Accelerometer" || mid == "Gravity Sensor" || mid == "Linear Accelerometer")
+        {
+            // Mirror Unity Sensor3Axies.InitializeProperties() + the prefab defaults
+            // (RangeDefault/OffsetDefault/SensitivityDefault/ResistanceDefault).
+            props = json{{"量程", 2.0}, {"偏移", 0.75}, {"响应系数", 0.229}, {"输出阻抗", 10000.0}, {"锁定", 1.0}};
+            stats = json{{"电压X", 0.0}, {"电压Y", 0.0}, {"电压Z", 0.0},
+                         {"测量值X", 0.0}, {"测量值Y", 0.0}, {"测量值Z", 0.0}};
+        }
+        else if (mid == "Attitude Sensor")
+        {
+            props = json{{"量程", 180.0}, {"偏移", 2.5}, {"响应系数", 0.0125}, {"输出阻抗", 10000.0}, {"锁定", 1.0}};
+            stats = json{{"电压X", 0.0}, {"电压Y", 0.0}, {"电压Z", 0.0},
+                         {"测量值X", 0.0}, {"测量值Y", 0.0}, {"测量值Z", 0.0}};
+        }
+        else if (mid == "Gyroscope")
+        {
+            props = json{{"量程", 150.0}, {"偏移", 2.5}, {"响应系数", 0.0125}, {"输出阻抗", 10000.0}, {"锁定", 1.0}};
+            stats = json{{"电压X", 0.0}, {"电压Y", 0.0}, {"电压Z", 0.0},
+                         {"测量值X", 0.0}, {"测量值Y", 0.0}, {"测量值Z", 0.0}};
+        }
+        else if (mid == "Magnetic Field Sensor")
+        {
+            props = json{{"量程", 0.04}, {"偏移", 3.2}, {"响应系数", 80.0}, {"输出阻抗", 10000.0}, {"锁定", 1.0}};
+            stats = json{{"电压X", 0.0}, {"电压Y", 0.0}, {"电压Z", 0.0},
+                         {"测量值X", 0.0}, {"测量值Y", 0.0}, {"测量值Z", 0.0}};
+        }
         else if (mid == "Logic Output")
         {
             props = json{{"状态", 0.0}, {"高电平", 3.0}, {"低电平", 0.0}, {"锁定", 1.0}};
